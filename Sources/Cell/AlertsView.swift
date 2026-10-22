@@ -11,6 +11,7 @@ struct AlertsView: View {
     var body: some View {
         VStack(spacing: 20) {
             permissionPanel
+            ReminderAlarmSettingsView(monitor: monitor, controller: notifications.alarm)
             Panel("Your reminders", subtitle: "Reminders fire once, then rearm after the battery moves 2% away.") {
                 if monitor.alerts.isEmpty {
                     EmptyMessage(icon: "bell.badge", title: "Choose your first reminder", detail: "Add a charge target or a low-battery reminder below.")
@@ -57,6 +58,9 @@ struct AlertsView: View {
                 }
             }
         }.task { await notifications.refresh() }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                Task { await notifications.refresh() }
+            }
     }
     private var duplicate: Bool { monitor.alerts.contains { $0.direction == direction && $0.threshold == Int(threshold) } }
     private var permissionPanel: some View {
@@ -65,21 +69,24 @@ struct AlertsView: View {
                 Image(systemName: notifications.authorization == .authorized ? "bell.badge.fill" : "bell.slash")
                     .font(.system(size: 22)).foregroundStyle(Palette.violet)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(notifications.authorization == .authorized ? "Notifications are enabled" : "Enable notifications for charge reminders")
+                    Text(notifications.bannerStatus)
                         .font(.system(size: 14, weight: .medium))
-                    Text(notifications.authorization == .denied ? "Allow Cell in System Settings → Notifications." : "Your rules also show a message in Cell when they trigger.")
+                    Text("For macOS pop-ups, choose Banners or Alerts for Cell in System Settings → Notifications. Focus can still silence them. Cell’s own alarm works separately.")
                         .font(.system(size: 12)).foregroundStyle(Palette.muted)
+                    if notifications.authorization == .authorized || notifications.authorization == .provisional {
+                        Text(notifications.soundsAllowed ? "macOS notification sound is enabled." : "macOS notification sound is off; Cell’s alarm can still play when Play sound is on.")
+                            .font(.system(size: 11)).foregroundStyle(notifications.soundsAllowed ? Palette.muted : Palette.amber)
+                    }
                     if let error = notifications.failure { Text(error).font(.caption).foregroundStyle(Palette.amber) }
                 }
                 Spacer()
-                if notifications.authorization == .denied {
-                    Button("Open notification settings") {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") { NSWorkspace.shared.open(url) }
-                    }.buttonStyle(.bordered)
-                } else if notifications.authorization == .notDetermined {
-                    Button("Enable notifications") { Task { await notifications.request() } }.buttonStyle(.borderedProminent)
-                } else {
-                    Button("Send test") { Task { await notifications.test(sound: monitor.sound) } }.buttonStyle(.bordered)
+                VStack(spacing: 8) {
+                    Button("Notification settings") { notifications.openSettings() }.buttonStyle(.bordered)
+                    if notifications.authorization == .notDetermined {
+                        Button("Enable notifications") { Task { await notifications.request() } }.buttonStyle(.borderedProminent)
+                    } else if notifications.authorization != .denied {
+                        Button("Test notification") { Task { await notifications.test(sound: monitor.sound) } }.buttonStyle(.bordered)
+                    }
                 }
             }
         }

@@ -20,12 +20,14 @@ final class BatteryMonitor: ObservableObject {
     @Published private(set) var error: String?
     @Published private(set) var notice: String?
     @Published var range: HistoryRange = .day { didSet { Task { await loadHistory() } } }
-    @Published var alerts: [ChargeAlert] = [] { didSet { saveAlerts() } }
+    @Published var alerts: [ChargeAlert] = [] {
+        didSet { saveAlerts(); notifications.alarm.updateRules(alerts) }
+    }
     @Published var interval: Double = 5 { didSet { defaults.set(interval, forKey: "sampleInterval") } }
-    @Published var sound = true { didSet { defaults.set(sound, forKey: "alertSound") } }
+    @Published var sound = true { didSet { defaults.set(sound, forKey: "alertSound"); notifications.alarm.setSoundEnabled(sound) } }
     @Published var showPercentage = true { didSet { defaults.set(showPercentage, forKey: "showPercentage") } }
     @Published var appMonitoring = true { didSet { defaults.set(appMonitoring, forKey: "appMonitoring") } }
-    let notifications = NotificationService()
+    let notifications: NotificationService
     let chargeLimit = ChargeLimitController()
     let insights: InsightsController
     private let defaults: UserDefaults
@@ -55,6 +57,7 @@ final class BatteryMonitor: ObservableObject {
     var lowPower: Bool { ProcessInfo.processInfo.isLowPowerModeEnabled }
 
     init(defaults: UserDefaults = .standard) {
+        self.notifications = NotificationService(defaults: defaults)
         self.insights = InsightsController(defaults: defaults)
         self.defaults = defaults
         if let data = defaults.data(forKey: "chargeAlerts"), let saved = try? JSONDecoder().decode([ChargeAlert].self, from: data) {
@@ -68,6 +71,8 @@ final class BatteryMonitor: ObservableObject {
         sound = defaults.object(forKey: "alertSound") as? Bool ?? true
         showPercentage = defaults.object(forKey: "showPercentage") as? Bool ?? true
         appMonitoring = defaults.object(forKey: "appMonitoring") as? Bool ?? true
+        notifications.alarm.updateRules(alerts)
+        notifications.alarm.readBattery = { [engine] in await engine.battery() }
         do {
             let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
                 appropriateFor: nil, create: true)
@@ -119,6 +124,7 @@ final class BatteryMonitor: ObservableObject {
         snapshot = await engine.battery()
         guard !asleep, !clearingHistory else { return }
         if snapshot.state != .unavailable {
+            notifications.alarm.reconcile(snapshot, rules: alerts)
             recent.append(snapshot)
             recent.removeAll { snapshot.date.timeIntervalSince($0.date) > 960 }
             let fired = evaluator.evaluate(snapshot, rules: alerts)
@@ -200,6 +206,7 @@ final class BatteryMonitor: ObservableObject {
         if let data = try? JSONEncoder().encode(alerts) { defaults.set(data, forKey: "chargeAlerts") }
     }
     func shutdown() {
+        notifications.alarm.dismiss()
         asleep = true
         loop?.cancel(); loop = nil
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }

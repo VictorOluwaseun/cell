@@ -106,6 +106,7 @@ struct MenuBarContent: View {
             DetailRow(title: "Health", value: Display.number(monitor.snapshot.health, digits: 0, unit: "%"))
             DetailRow(title: "Charge cycles", value: monitor.snapshot.cycleCount.map(String.init) ?? "—")
             MenuBarLimitControls(controller: monitor.chargeLimit)
+            ActiveReminderAlarmControls(controller: monitor.notifications.alarm)
             MenuBarForecast(controller: monitor.insights)
             Divider()
             Button("Open dashboard") { openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true) }

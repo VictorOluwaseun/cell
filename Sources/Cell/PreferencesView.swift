@@ -24,7 +24,7 @@ struct PreferencesView: View {
                 }
             }
             Panel("Reminders & startup") {
-                setting("Alert sound", detail: "Play the macOS notification sound with charge reminders.") {
+                setting("Alert sound", detail: "Enable sound for Cell alarms and macOS notifications. Choose the alarm tone, volume and ringing duration in Charge alerts.") {
                     Toggle("Alert sound", isOn: $monitor.sound).labelsHidden().toggleStyle(.switch)
                 }
                 setting("Open at login", detail: "Start Cell when you sign in to your Mac.") {
