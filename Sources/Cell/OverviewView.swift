@@ -61,7 +61,11 @@ struct OverviewView: View {
                 BatteryGauge(level: battery.level, available: battery.state != .unavailable, charging: battery.state == .charging)
                     .frame(width: 170, height: 170)
                 VStack(alignment: .leading, spacing: 13) {
-                    Label(battery.state.title, systemImage: battery.state.onAC ? "powerplug.fill" : "battery.75percent")
+                    HStack(spacing: 6) {
+                        BatteryLevelIcon(level: battery.level, charging: battery.state == .charging,
+                                         available: battery.state != .unavailable)
+                        Text(battery.state.title)
+                    }
                         .font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.mint)
                     Text(statusHeadline).font(.system(size: 25, weight: .medium)).fixedSize(horizontal: false, vertical: true)
                     Text(statusDetail).font(.system(size: 12)).foregroundStyle(Palette.muted).lineSpacing(4)
@@ -119,7 +123,7 @@ struct BatteryGauge: View {
                         style: StrokeStyle(lineWidth: 10, lineCap: .round))
                 .rotationEffect(.degrees(-90))
             VStack(spacing: 7) {
-                Image(systemName: charging ? "bolt.fill" : "battery.75percent").font(.system(size: 18)).foregroundStyle(Palette.mint)
+                BatteryLevelIcon(level: level, charging: charging, available: available).foregroundStyle(Palette.mint)
                 Text(available ? "\(Int(level.rounded()))%" : "—").font(.system(size: 40, weight: .medium, design: .rounded)).monospacedDigit()
                 Text("Battery level").font(.system(size: 10)).foregroundStyle(Palette.muted)
             }

@@ -61,7 +61,8 @@ struct CellApp: App {
             MenuBarContent(monitor: monitor)
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: monitor.snapshot.state == .charging ? "battery.100percent.bolt" : "battery.75percent")
+                BatteryLevelIcon(level: monitor.snapshot.level, charging: monitor.snapshot.state == .charging,
+                                 available: monitor.snapshot.state != .unavailable)
                 if monitor.showPercentage {
                     Text(monitor.snapshot.state == .unavailable ? "—" : "\(Int(monitor.snapshot.level.rounded()))%")
                 }
@@ -97,6 +98,8 @@ struct MenuBarContent: View {
                 Text(monitor.snapshot.state.title).font(.caption).foregroundStyle(Palette.mint)
             }
             HStack(alignment: .firstTextBaseline) {
+                BatteryLevelIcon(level: monitor.snapshot.level, charging: monitor.snapshot.state == .charging,
+                                 available: monitor.snapshot.state != .unavailable)
                 Text(monitor.snapshot.state == .unavailable ? "—" : "\(Int(monitor.snapshot.level.rounded()))%")
                     .font(.system(size: 42, weight: .medium, design: .rounded))
                 Spacer()
