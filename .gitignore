@@ -3,3 +3,7 @@ dist/
 .swiftpm/
 .DS_Store
 *.xcuserstate
+__pycache__/
+*.p12
+*.p8
+*.keychain-db

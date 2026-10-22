@@ -44,7 +44,7 @@ struct PreferencesView: View {
                     Button("Clear history…", role: .destructive) { confirmClear = true }.buttonStyle(.bordered)
                 }
             }
-            Panel("Cell 1.1") {
+            Panel("Cell \(Bundle.main.object(forInfoDictionaryKey: "CellReleaseVersion") as? String ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")") {
                 HStack(spacing: 35) {
                     VStack(alignment: .leading, spacing: 14) {
                         DetailRow(title: "Thermal pressure", value: monitor.thermal)
