@@ -130,7 +130,8 @@ def make_package(app: Path, destination: Path, staging: Path, info: dict, enviro
     resources = staging / "installer-resources"
     resources.mkdir()
     notice = "" if info["signing"] == "developer-id" else '<p class="notice">Unsigned community build. Apple has not notarized this download.</p>'
-    style = "body{font:14px -apple-system,Helvetica,sans-serif;color:#202333;line-height:1.6;margin:24px}h1{font-size:34px;letter-spacing:-1px}h2{font-size:18px}.brand{color:#7961c8}.notice{background:#fff2d9;padding:12px;border-radius:10px}li{margin:9px 0}.muted{color:#626575}"
+    # Installer adapts text colors for dark mode; avoid fixed light backgrounds.
+    style = "body{font:12px -apple-system,Helvetica,sans-serif;line-height:1.4;margin:16px}h1{font-size:28px;letter-spacing:-1px;margin:0 0 8px}h2{font-size:17px;margin:8px 0}p{margin:8px 0}.brand{color:#7961c8}.notice{font-weight:bold}li{margin:8px 0}"
     pages = {
         "welcome.html": f'<h1><span class="brand">cell</span></h1><h2>A little clarity for every charge.</h2><p>Version {html.escape(info["version"])} · macOS 14 or later · Apple Silicon &amp; Intel</p><p>Live battery readings, app energy, charging profiles, alerts and reports. All history stays on your Mac.</p>{notice}<p class="muted">Quit Cell before upgrading. The installer places Cell in Applications. Charging control is an optional setup inside the app.</p>',
         "conclusion.html": '<h1>You’re ready to charge ahead.</h1><ol><li>Open <b>Cell</b> from Applications.</li><li>Allow notifications in <b>Charge alerts</b> when you want reminders.</li><li>For a charging limit, open <b>Charging limit → Install charging helper…</b> and approve the macOS prompt.</li></ol><p class="muted">The package does not activate charging control. If Cell asks to reinstall its helper after an update, approve that from inside Cell.</p>',
