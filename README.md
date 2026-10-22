@@ -98,6 +98,10 @@ SQLite uses WAL, prepared statements and a busy timeout. The telemetry actor kee
 
 ## Distribution
 
-The included bundle is for local use. Public distribution still requires your own bundle identifier, Developer ID signing and Apple notarization. The app intentionally runs without App Sandbox because system/process visibility is limited in sandboxed apps. Test Intel and Apple Silicon hardware, older supported macOS releases, permission denial, Focus, sleep/wake and actual charge/discharge crossings before releasing.
+Pushing a version tag such as `v1.2.0` runs the macOS release workflow and publishes a universal Apple Silicon/Intel **DMG, PKG and app ZIP**, with installation notes, release metadata and SHA-256 checksums. The PKG has native welcome/completion pages; the DMG includes an Applications shortcut. Both include the optional charging helper inside Cell.app.
+
+By default these are explicitly marked **unsigned prereleases**. Configure your own Developer ID certificates and notarization credentials to produce signed, notarized stable releases. See [Releasing Cell](docs/RELEASING.md) for tag commands, required GitHub secrets, manual build-only runs and local packaging (`make release VERSION=1.2.0`). No version tag is created automatically.
+
+The app intentionally runs without App Sandbox because system/process visibility is limited in sandboxed apps. Test Intel and Apple Silicon hardware, older supported macOS releases, permission denial, Focus, sleep/wake and actual charge/discharge crossings before public distribution.
 
 Platform references: [Apple IOPowerSources](https://developer.apple.com/documentation/iokit/iopowersources_h), [Apple notifications](https://developer.apple.com/documentation/usernotifications/unusernotificationcenter).
