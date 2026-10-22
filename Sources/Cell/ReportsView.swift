@@ -40,16 +40,22 @@ struct ReportsView: View {
                     MetricTile(icon: "bolt", title: "Energy used", value: Display.number(report.current.measuredBatterySeconds > 0 ? report.current.dischargedWh : nil, digits: 2, unit: " Wh"), detail: "Battery discharge only", tint: Palette.amber)
                     MetricTile(icon: "waveform.path", title: "Average drain", value: Display.number(report.current.averageDrainWatts, digits: 2, unit: " W"), detail: "Measured battery intervals", tint: Palette.blue)
                     MetricTile(icon: "arrow.up.arrow.down", title: "Drain change", value: Display.number(report.observedDrainChange, digits: 1, unit: "%"), detail: "Vs. preceding 7 days; needs 30m each")
-                    MetricTile(icon: "moon", title: "Sleep sessions", value: String(report.sleeps.count), detail: "Observed sleep/wake comparisons", tint: Palette.blue)
-                    MetricTile(icon: "heart", title: "Health change", value: Display.number(report.healthChange, digits: 2, unit: " pt"), detail: "Daily capacity estimate; needs 2 days", tint: Palette.mint)
+                    if controller.features.recordsSleep {
+                        MetricTile(icon: "moon", title: "Sleep sessions", value: String(report.sleeps.count), detail: "Observed sleep/wake comparisons", tint: Palette.blue)
+                    }
+                    if controller.features.recordsHealth {
+                        MetricTile(icon: "heart", title: "Health change", value: Display.number(report.healthChange, digits: 2, unit: " pt"), detail: "Daily capacity estimate; needs 2 days", tint: Palette.mint)
+                    }
                 }
-                Panel("Apps in this report", subtitle: "Reported process energy is separate from total battery energy.") {
-                    AppEnergyList(totals: Array(report.apps.prefix(10)))
+                if controller.features.recordsAppEnergy {
+                    Panel("Apps in this report", subtitle: "Reported process energy is separate from total battery energy.") {
+                        AppEnergyList(totals: Array(report.apps.prefix(10)))
+                    }
                 }
             }
             Panel("Weekly reminders") {
-                Toggle("Notify me when a weekly report is ready", isOn: $controller.weeklyNotifications).toggleStyle(.switch).font(.system(size: 13))
-                Text("At most once per ISO calendar week, on the next check while Cell is running, after at least 30 minutes of recorded coverage. Notification permission and macOS Focus settings apply. Reports remain available here without notifications.")
+                Text(controller.weeklyNotifications ? "Weekly report notifications are enabled." : "Weekly report notifications are off.").font(.system(size: 13))
+                Text("Manage notifications in Settings. Reminders arrive at most once per ISO calendar week while Cell is running, after at least 30 minutes of recorded coverage. Notification permission and macOS Focus settings apply.")
                     .font(.system(size: 11)).foregroundStyle(Palette.muted).lineSpacing(3)
             }
         }.task { await controller.reload() }

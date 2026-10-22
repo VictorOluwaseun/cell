@@ -28,6 +28,8 @@ public struct BatterySnapshot: Codable, Sendable, Identifiable, Equatable {
     public var systemWatts: Double?
     public var adapterWatts: Double?
     public var minutesRemaining: Int?
+    /// Changes when history recording resumes, so statistics never bridge a user-requested pause.
+    public var recordingID: UUID?
     public var id: Date { date }
     public var batteryWatts: Double? {
         guard let voltage, let currentMA else { return nil }
@@ -84,7 +86,8 @@ public struct BatteryStatistics: Sendable {
         for (a, b) in zip(samples, samples.dropFirst()) {
             let dt = b.date.timeIntervalSince(a.date)
             // Never extrapolate across sleep, shutdown, or a change of power source.
-            guard dt > 0, dt <= 180, a.state == b.state, a.state != .unavailable else { continue }
+            guard dt > 0, dt <= 180, a.state == b.state, a.state != .unavailable,
+                  a.recordingID == b.recordingID else { continue }
             observedSeconds += dt
             if a.state == .discharging {
                 batterySeconds += dt
@@ -111,6 +114,7 @@ public enum Analytics {
         var window = [last]
         for item in samples.dropLast().reversed() {
             guard item.state == last.state, last.date.timeIntervalSince(item.date) <= 900,
+                  item.recordingID == last.recordingID,
                   window.last!.date.timeIntervalSince(item.date) <= 180 else { break }
             window.append(item)
         }

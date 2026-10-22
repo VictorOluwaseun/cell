@@ -56,7 +56,9 @@ struct DashboardView: View {
                         case .timeline: TimelineView(controller: monitor.insights)
                         case .reports: ReportsView(controller: monitor.insights)
                         case .limit:
-                            ChargingProfilesView(monitor: monitor, controller: monitor.insights, chargeLimit: monitor.chargeLimit)
+                            if monitor.features[.chargingProfiles] {
+                                ChargingProfilesView(monitor: monitor, controller: monitor.insights, chargeLimit: monitor.chargeLimit)
+                            }
                             ChargeLimitView(controller: monitor.chargeLimit)
                         case .alerts: AlertsView(monitor: monitor, notifications: monitor.notifications)
                         case .settings: PreferencesView(monitor: monitor)
@@ -69,6 +71,7 @@ struct DashboardView: View {
         .frame(minWidth: 1_020, minHeight: 720)
         .background(Palette.background).foregroundStyle(Palette.text).tint(Palette.violet)
         .onChange(of: page) { _, _ in Task { await monitor.refresh(); await monitor.notifications.refresh() } }
+        .onChange(of: monitor.features) { _, _ in if !available(page) { page = .overview } }
     }
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 30) {
@@ -79,7 +82,7 @@ struct DashboardView: View {
                 Text("cell").font(.system(size: 29, weight: .semibold, design: .rounded))
             }.padding(.top, 28).padding(.leading, 12)
             VStack(spacing: 7) {
-                ForEach(DashboardPage.allCases.filter { $0 != .settings }) { item in navigationButton(item) }
+                ForEach(DashboardPage.allCases.filter { $0 != .settings && available($0) }) { item in navigationButton(item) }
             }
             Spacer()
             navigationButton(.settings)
@@ -88,6 +91,17 @@ struct DashboardView: View {
                 Text("\(Host.current().localizedName ?? "This Mac")").lineLimit(1)
             }.font(.system(size: 10)).foregroundStyle(Palette.muted).padding(.horizontal, 12).padding(.bottom, 17)
         }.padding(.horizontal, 14).frame(width: 207).background(Palette.sidebar)
+    }
+    private func available(_ page: DashboardPage) -> Bool {
+        switch page {
+        case .history: monitor.features[.batteryHistory]
+        case .activity: monitor.features[.appActivity]
+        case .timeline: monitor.features.recordsTimeline
+        case .reports: monitor.features.generatesReports
+        case .alerts: monitor.features[.chargeAlerts]
+        case .insights: monitor.features[.runtimeForecast] || monitor.features[.batteryHistory]
+        default: true
+        }
     }
     private func navigationButton(_ item: DashboardPage) -> some View {
         Button { page = item } label: {

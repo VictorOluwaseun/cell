@@ -19,39 +19,43 @@ struct OverviewView: View {
                 MetricTile(icon: "thermometer.medium", title: "Temperature", value: Display.number(battery.temperature, unit: "°C"),
                            detail: "Battery sensor reading", tint: Palette.amber)
             }
-            RuntimeForecastPanel(controller: monitor.insights)
-            ChargingExplanationPanel(controller: monitor.chargeLimit, battery: battery)
-            HistoryChartView(monitor: monitor, compact: true)
+            if monitor.features[.runtimeForecast] { RuntimeForecastPanel(controller: monitor.insights) }
+            if monitor.features[.chargingExplanation] { ChargingExplanationPanel(controller: monitor.chargeLimit, battery: battery) }
+            if monitor.features[.batteryHistory] { HistoryChartView(monitor: monitor, compact: true) }
             HStack(alignment: .top, spacing: 18) {
-                Panel("Live electrical readings", subtitle: "Precision beyond the percentage") {
-                    VStack(spacing: 15) {
-                        DetailRow(title: "Instantaneous change", value: Display.number(battery.instantaneousRate, digits: 3, unit: "%/h"), color: Palette.violet)
-                        DetailRow(title: "C-rate", value: Display.number(battery.cRate, digits: 4, unit: " C"))
-                        DetailRow(title: "Current", value: Display.number(battery.currentMA, digits: 0, unit: " mA"))
-                        DetailRow(title: "Voltage", value: Display.number(battery.voltage, digits: 3, unit: " V"))
-                        DetailRow(title: "15-minute trend", value: Display.number(monitor.trend, digits: 2, unit: "%/h"))
-                    }
-                    Text("Positive current means charging. Sensor precision and refresh rate depend on your Mac.")
-                        .font(.system(size: 10)).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+                if monitor.features[.advancedReadings] { electricalPanel }
+                if monitor.features[.appActivity] { activityPanel }
+            }
+        }
+    }
+    private var electricalPanel: some View {
+        Panel("Live electrical readings", subtitle: "Precision beyond the percentage") {
+            VStack(spacing: 15) {
+                DetailRow(title: "Instantaneous change", value: Display.number(battery.instantaneousRate, digits: 3, unit: "%/h"), color: Palette.violet)
+                DetailRow(title: "C-rate", value: Display.number(battery.cRate, digits: 4, unit: " C"))
+                DetailRow(title: "Current", value: Display.number(battery.currentMA, digits: 0, unit: " mA"))
+                DetailRow(title: "Voltage", value: Display.number(battery.voltage, digits: 3, unit: " V"))
+                DetailRow(title: "15-minute trend", value: Display.number(monitor.trend, digits: 2, unit: "%/h"))
+            }
+            Text("Positive current means charging. Sensor precision and refresh rate depend on your Mac.")
+                .font(.system(size: 10)).foregroundStyle(Palette.muted).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+    private var activityPanel: some View {
+        Panel {
+            HStack {
+                Text("Power activity").font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Button("View all", action: showActivity).buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Palette.violet)
+            }
+            if monitor.apps.isEmpty {
+                EmptyMessage(icon: "waveform.path", title: "Measuring app activity", detail: "The first comparison takes about 10 seconds while this window is active.")
+            } else {
+                VStack(spacing: 15) {
+                    ForEach(Array(monitor.apps.prefix(4))) { app in AppActivityRow(app: app, compact: true) }
                 }
-                Panel {
-                    HStack {
-                        Text("Power activity").font(.system(size: 15, weight: .semibold))
-                        Spacer()
-                        Button("View all", action: showActivity).buttonStyle(.plain).font(.system(size: 11)).foregroundStyle(Palette.violet)
-                    }
-                    if !monitor.appMonitoring {
-                        EmptyMessage(icon: "pause.circle", title: "App monitoring is off", detail: "Enable it in Settings to see activity.")
-                    } else if monitor.apps.isEmpty {
-                        EmptyMessage(icon: "waveform.path", title: "Measuring app activity", detail: "The first comparison takes about 10 seconds while this window is active.")
-                    } else {
-                        VStack(spacing: 15) {
-                            ForEach(Array(monitor.apps.prefix(4))) { app in AppActivityRow(app: app, compact: true) }
-                        }
-                        Text(monitor.apps.contains { $0.watts != nil } ? "Process energy reported by macOS." : "CPU activity is a power-use proxy; watts are unavailable.")
-                            .font(.system(size: 10)).foregroundStyle(Palette.muted)
-                    }
-                }
+                Text(monitor.apps.contains { $0.watts != nil } ? "Process energy reported by macOS." : "CPU activity is a power-use proxy; watts are unavailable.")
+                    .font(.system(size: 10)).foregroundStyle(Palette.muted)
             }
         }
     }

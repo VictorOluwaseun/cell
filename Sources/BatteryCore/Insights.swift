@@ -190,6 +190,7 @@ public enum InsightMath {
         for (a, b) in zip(samples, samples.dropFirst()) {
             let dt = b.date.timeIntervalSince(a.date)
             guard b.date < cutoff, dt > 0, dt <= 180, a.state == .discharging, b.state == .discharging,
+                  a.recordingID == b.recordingID,
                   let wa = a.batteryWatts, let wb = b.batteryWatts else { continue }
             let power = -(wa + wb) / 2
             if power > 0.5 && power < 200 { values.append(power); seconds += dt }
@@ -207,7 +208,8 @@ public enum InsightMath {
             group.removeAll(keepingCapacity: true)
         }
         for sample in samples {
-            if let previous = group.last, sample.date.timeIntervalSince(previous.date) > 180 { finish(ongoing: false) }
+            if let previous = group.last,
+               sample.date.timeIntervalSince(previous.date) > 180 || sample.recordingID != previous.recordingID { finish(ongoing: false) }
             if sample.state.onAC { group.append(sample) } else { finish(ongoing: false) }
         }
         finish(ongoing: samples.last.map { $0.state.onAC && now.timeIntervalSince($0.date) <= 180 } ?? false)
@@ -218,7 +220,7 @@ public enum InsightMath {
         // Split continuous intervals at local midnight, including DST boundaries.
         for (a, b) in zip(samples, samples.dropFirst()) {
             let dt = b.date.timeIntervalSince(a.date)
-            guard dt > 0, dt <= 180, a.state == b.state else { continue }
+            guard dt > 0, dt <= 180, a.state == b.state, a.recordingID == b.recordingID else { continue }
             let stats = BatteryStatistics(samples: [a, b])
             var cursor = a.date
             while cursor < b.date {

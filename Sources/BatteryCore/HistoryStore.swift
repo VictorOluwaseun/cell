@@ -56,7 +56,7 @@ public actor HistoryStore {
             throw StoreFailure(message: db.map { String(cString: sqlite3_errmsg($0)) } ?? "History is closed.")
         }
     }
-    public func append(_ sample: BatterySnapshot) throws {
+    public func append(_ sample: BatterySnapshot, recordHealthHistory: Bool = true) throws {
         guard db != nil else { throw StoreFailure(message: "History is closed.") }
         let data = try JSONEncoder().encode(sample)
         let payload = String(decoding: data, as: UTF8.self)
@@ -67,7 +67,7 @@ public actor HistoryStore {
         let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
         _ = payload.withCString { sqlite3_bind_text(statement, 2, $0, -1, transient) }
         try check(sqlite3_step(statement))
-        try recordHealth(sample)
+        if recordHealthHistory { try recordHealth(sample) }
         if sample.date.timeIntervalSince(lastPrune) > 3_600 {
             try prune(before: sample.date.addingTimeInterval(-90 * 86_400))
             try pruneInsights(now: sample.date)

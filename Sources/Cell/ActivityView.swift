@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import BatteryCore
 
 struct AppActivityRow: View {
     var app: AppActivity
@@ -66,10 +67,12 @@ struct ActivityView: View {
     }
     var body: some View {
         VStack(spacing: 20) {
-            Picker("App activity view", selection: $showHistory) {
-                Text("Live activity").tag(false); Text("Energy history").tag(true)
-            }.pickerStyle(.segmented).labelsHidden().frame(width: 300, alignment: .leading)
-            if showHistory { AppEnergyHistoryView(controller: monitor.insights) }
+            if monitor.features.recordsAppEnergy {
+                Picker("App activity view", selection: $showHistory) {
+                    Text("Live activity").tag(false); Text("Energy history").tag(true)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 300, alignment: .leading)
+            }
+            if showHistory && monitor.features.recordsAppEnergy { AppEnergyHistoryView(controller: monitor.insights) }
             else { liveContent }
         }
     }
@@ -103,7 +106,7 @@ struct ActivityView: View {
                     Text("Memory").frame(width: 85, alignment: .trailing)
                     Text("Power").frame(width: 90, alignment: .trailing)
                 }.font(.system(size: 10)).foregroundStyle(Palette.muted)
-                if !monitor.appMonitoring {
+                if !monitor.features[.appActivity] {
                     EmptyMessage(icon: "pause.circle", title: "Monitoring is paused", detail: "Turn on app monitoring in Settings to collect app activity.")
                 } else if monitor.apps.isEmpty {
                     EmptyMessage(icon: "waveform.path", title: "Collecting the first interval", detail: "Keep Cell active for about 10 seconds to compare process counters.")

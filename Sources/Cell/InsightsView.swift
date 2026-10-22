@@ -7,22 +7,28 @@ struct InsightsView: View {
     var body: some View {
         VStack(spacing: 20) {
             InsightsRangeControl(controller: controller)
-            RuntimeForecastPanel(controller: controller)
-            sleepPanel
-            healthPanel
-            Panel("Unusual-drain detection") {
-                if let baseline = controller.dashboard.baseline {
-                    DetailRow(title: "Recorded baseline", value: Display.number(baseline.watts, digits: 2, unit: " W"), color: Palette.violet)
-                    DetailRow(title: "Baseline coverage", value: Display.duration(baseline.seconds))
-                } else {
-                    Text("Cell needs at least 30 minutes of recorded battery use, excluding the most recent 15 minutes, to establish a baseline.")
-                        .font(.system(size: 12)).foregroundStyle(Palette.muted)
-                }
-                Toggle("Notify me about sustained unusual drain", isOn: $controller.drainAlerts).toggleStyle(.switch).font(.system(size: 13))
-                Text("An alert requires 5 continuous minutes above both twice your median drain and 5 W above it, with an 8 W minimum. Alerts have a 2-hour cooldown. Workload changes can explain higher drain; this is a comparison, not a diagnosis.")
-                    .font(.system(size: 11)).foregroundStyle(Palette.muted).lineSpacing(3)
+            if controller.features[.runtimeForecast] { RuntimeForecastPanel(controller: controller) }
+            if controller.features.recordsSleep { sleepPanel }
+            if controller.features.recordsHealth { healthPanel }
+            if controller.detectsDrain { drainPanel }
+            if !controller.features[.runtimeForecast] && !controller.features.recordsSleep && !controller.features.recordsHealth && !controller.detectsDrain {
+                Panel { Text("Choose the insights you want in Settings.").foregroundStyle(Palette.muted) }
             }
         }.task { await controller.reload() }
+    }
+    private var drainPanel: some View {
+        Panel("Unusual-drain detection") {
+            if let baseline = controller.dashboard.baseline {
+                DetailRow(title: "Recorded baseline", value: Display.number(baseline.watts, digits: 2, unit: " W"), color: Palette.violet)
+                DetailRow(title: "Baseline coverage", value: Display.duration(baseline.seconds))
+            } else {
+                Text("Cell needs at least 30 minutes of recorded battery use, excluding the most recent 15 minutes, to establish a baseline.")
+                    .font(.system(size: 12)).foregroundStyle(Palette.muted)
+            }
+            Text("Manage unusual-drain alerts in Settings.").font(.system(size: 11)).foregroundStyle(Palette.muted)
+            Text("An alert requires 5 continuous minutes above both twice your median drain and 5 W above it, with an 8 W minimum. Alerts have a 2-hour cooldown. Workload changes can explain higher drain; this is a comparison, not a diagnosis.")
+                .font(.system(size: 11)).foregroundStyle(Palette.muted).lineSpacing(3)
+        }
     }
     private var sleepPanel: some View {
         Panel("Sleep drain", subtitle: "Compare the last reading before sleep with the first reading after wake.") {

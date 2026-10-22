@@ -9,6 +9,9 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Obs
     @Published private(set) var soundsAllowed = false
     @Published private(set) var alertStyle: UNAlertStyle = .none
     @Published var failure: String?
+    var remindersEnabled = true {
+        didSet { if !remindersEnabled { alarm.dismiss() } }
+    }
     let alarm: ReminderAlarmController
     private let center = UNUserNotificationCenter.current()
     private static let category = "CELL_CHARGE_REMINDER"
@@ -46,6 +49,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Obs
         catch { failure = error.localizedDescription }
     }
     func deliver(_ rule: ChargeAlert, level: Double, sound: Bool) async -> Bool {
+        guard remindersEnabled else { return false }
         let content = UNMutableNotificationContent()
         content.title = rule.title
         content.body = rule.direction == .below
@@ -56,6 +60,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Obs
         alarm.setSoundEnabled(sound)
         alarm.present(message)
         await refresh()
+        guard remindersEnabled else { return false }
         guard authorization == .authorized || authorization == .provisional else { return !alarm.session.messages.isEmpty }
         // Avoid layering a system chime over the repeating local alarm.
         if sound && !alarm.isRinging && alarm.session.snoozedUntil == nil { content.sound = .default }
@@ -65,6 +70,10 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Obs
         }
         do {
             try await center.add(UNNotificationRequest(identifier: rule.id.uuidString, content: content, trigger: nil))
+            if !remindersEnabled {
+                center.removeDeliveredNotifications(withIdentifiers: [rule.id.uuidString])
+                return false
+            }
             failure = nil; return true
         } catch { failure = error.localizedDescription; return false }
     }
@@ -79,14 +88,15 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Obs
         do { try await center.add(UNNotificationRequest(identifier: "cell-test", content: content, trigger: nil)) }
         catch { failure = error.localizedDescription }
     }
-    func deliverInsight(id: String, title: String, body: String, sound: Bool) async -> Bool {
+    func deliverInsight(id: String, title: String, body: String, sound: Bool, enabled: () -> Bool = { true }) async -> Bool {
         await refresh()
-        guard authorization == .authorized || authorization == .provisional else { return false }
+        guard enabled(), authorization == .authorized || authorization == .provisional else { return false }
         let content = UNMutableNotificationContent()
         content.title = title; content.body = body
         if sound { content.sound = .default }
         do {
             try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+            if !enabled() { center.removeDeliveredNotifications(withIdentifiers: [id]); return false }
             return true
         } catch { failure = error.localizedDescription; return false }
     }

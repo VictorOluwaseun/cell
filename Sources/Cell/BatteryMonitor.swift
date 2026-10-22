@@ -21,12 +21,15 @@ final class BatteryMonitor: ObservableObject {
     @Published private(set) var notice: String?
     @Published var range: HistoryRange = .day { didSet { Task { await loadHistory() } } }
     @Published var alerts: [ChargeAlert] = [] {
-        didSet { saveAlerts(); notifications.alarm.updateRules(alerts) }
+        didSet { saveAlerts(); notifications.alarm.updateRules(activeAlerts) }
     }
     @Published var interval: Double = 5 { didSet { defaults.set(interval, forKey: "sampleInterval") } }
     @Published var sound = true { didSet { defaults.set(sound, forKey: "alertSound"); notifications.alarm.setSoundEnabled(sound) } }
     @Published var showPercentage = true { didSet { defaults.set(showPercentage, forKey: "showPercentage") } }
-    @Published var appMonitoring = true { didSet { defaults.set(appMonitoring, forKey: "appMonitoring") } }
+    @Published var features: FeaturePreferences {
+        didSet { updateFeatures(from: oldValue) }
+    }
+    var activeAlerts: [ChargeAlert] { features[.chargeAlerts] ? alerts : [] }
     let notifications: NotificationService
     let chargeLimit = ChargeLimitController()
     let insights: InsightsController
@@ -44,6 +47,9 @@ final class BatteryMonitor: ObservableObject {
     private var clearingHistory = false
     private var asleep = false
     private var historyGeneration = 0
+    private var recordingID = UUID()
+    private var processGeneration = 0
+    private var needsProcessReset = true
     var trend: Double? { Analytics.ratePerHour(recent) }
     var thermal: String {
         switch ProcessInfo.processInfo.thermalState {
@@ -60,6 +66,7 @@ final class BatteryMonitor: ObservableObject {
         self.notifications = NotificationService(defaults: defaults)
         self.insights = InsightsController(defaults: defaults)
         self.defaults = defaults
+        features = FeaturePreferences(defaults: defaults)
         if let data = defaults.data(forKey: "chargeAlerts"), let saved = try? JSONDecoder().decode([ChargeAlert].self, from: data) {
             alerts = saved
         } else {
@@ -70,8 +77,9 @@ final class BatteryMonitor: ObservableObject {
         interval = [2.0, 5, 15, 30].contains(savedInterval) ? savedInterval : 5
         sound = defaults.object(forKey: "alertSound") as? Bool ?? true
         showPercentage = defaults.object(forKey: "showPercentage") as? Bool ?? true
-        appMonitoring = defaults.object(forKey: "appMonitoring") as? Bool ?? true
-        notifications.alarm.updateRules(alerts)
+        notifications.remindersEnabled = features[.chargeAlerts]
+        notifications.alarm.updateRules(activeAlerts)
+        insights.setFeatures(features)
         notifications.alarm.readBattery = { [engine] in await engine.battery() }
         do {
             let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
@@ -87,6 +95,26 @@ final class BatteryMonitor: ObservableObject {
                 let seconds = NSApp.isActive ? self.interval : max(15, self.interval)
                 try? await Task.sleep(for: .seconds(seconds), tolerance: .milliseconds(500))
             }
+        }
+    }
+
+    private func updateFeatures(from old: FeaturePreferences) {
+        guard features != old else { return }
+        features.save(to: defaults)
+        insights.setFeatures(features)
+        if features[.chargeAlerts] != old[.chargeAlerts] {
+            evaluator = AlertEvaluator()
+            notifications.remindersEnabled = features[.chargeAlerts]
+            notifications.alarm.updateRules(activeAlerts)
+        }
+        if features[.appActivity] != old[.appActivity] || features.recordsAppEnergy != old.recordsAppEnergy {
+            processGeneration += 1; needsProcessReset = true; lastApps = .distantPast
+            apps = []; lastAppUpdate = nil
+        }
+        if features[.batteryHistory] != old[.batteryHistory] {
+            historyGeneration += 1; lastSave = .distantPast; recordingID = UUID()
+            if !features[.batteryHistory] { history = []; chart = []; chartSegments = []; statistics = .init(samples: []) }
+            else { Task { await loadHistory() } }
         }
     }
 
@@ -124,29 +152,38 @@ final class BatteryMonitor: ObservableObject {
         snapshot = await engine.battery()
         guard !asleep, !clearingHistory else { return }
         if snapshot.state != .unavailable {
-            notifications.alarm.reconcile(snapshot, rules: alerts)
-            recent.append(snapshot)
-            recent.removeAll { snapshot.date.timeIntervalSince($0.date) > 960 }
-            let fired = evaluator.evaluate(snapshot, rules: alerts)
+            notifications.alarm.reconcile(snapshot, rules: activeAlerts)
+            if features[.advancedReadings] {
+                recent.append(snapshot)
+                recent.removeAll { snapshot.date.timeIntervalSince($0.date) > 960 }
+            } else { recent.removeAll(keepingCapacity: true) }
+            let fired = evaluator.evaluate(snapshot, rules: activeAlerts)
             for rule in fired {
+                guard features[.chargeAlerts], alerts.contains(where: { $0.id == rule.id && $0.enabled }) else { continue }
                 notice = "\(rule.title): battery at \(Int(snapshot.level.rounded()))%."
                 _ = await notifications.deliver(rule, level: snapshot.level, sound: sound)
                 await insights.record(.init(date: snapshot.date, kind: .alert, title: rule.title, detail: "Battery at \(Int(snapshot.level))%."))
             }
-            if snapshot.date.timeIntervalSince(lastSave) >= 60 || snapshot.state != previous.state {
+            if features[.batteryHistory], snapshot.date.timeIntervalSince(lastSave) >= 60 || snapshot.state != previous.state {
                 do {
-                    try await store?.append(snapshot); lastSave = snapshot.date
+                    var recorded = snapshot; recorded.recordingID = recordingID
+                    try await store?.append(recorded, recordHealthHistory: features.recordsHealth); lastSave = snapshot.date
                     await loadHistory()
                 } catch { self.error = "History could not be saved: \(error.localizedDescription)" }
             }
         }
-        if appMonitoring, Date.now.timeIntervalSince(lastApps) >= (NSApp.isActive ? 10 : 30) {
+        if features[.appActivity], Date.now.timeIntervalSince(lastApps) >= (NSApp.isActive ? 10 : 30) {
+            let generation = processGeneration
+            if needsProcessReset { needsProcessReset = false; await engine.resetProcesses() }
             let catalog = NSWorkspace.shared.runningApplications.map {
                 AppIdentity(pid: $0.processIdentifier, name: $0.localizedName ?? "Application", bundlePath: $0.bundleURL?.path)
             }
-            apps = await engine.applications(catalog: catalog)
-            insights.accumulate(apps, at: .now)
-            lastApps = .now; lastAppUpdate = .now
+            let result = await engine.applications(catalog: catalog)
+            if features[.appActivity], generation == processGeneration, !asleep, !clearingHistory {
+                apps = result
+                insights.accumulate(apps, at: .now)
+                lastApps = .now; lastAppUpdate = .now
+            }
         }
         await chargeLimit.refresh()
         guard !asleep, !clearingHistory else { return }
@@ -155,6 +192,7 @@ final class BatteryMonitor: ObservableObject {
     }
 
     func loadHistory() async {
+        guard features[.batteryHistory] else { return }
         historyGeneration += 1
         let generation = historyGeneration
         let selectedRange = range
@@ -165,6 +203,7 @@ final class BatteryMonitor: ObservableObject {
             var groups: [[BatterySnapshot]] = []
             for sample in result {
                 if let previous = groups.last?.last, sample.state == previous.state,
+                   sample.recordingID == previous.recordingID,
                    sample.date.timeIntervalSince(previous.date) <= 180 {
                     groups[groups.count - 1].append(sample)
                 } else { groups.append([sample]) }

@@ -5,11 +5,15 @@ import BatteryCore
 private actor InsightProcessor {
     private var recent: [BatterySnapshot] = []
     private var detector = DrainAnomalyDetector()
-    func process(_ sample: BatterySnapshot, baseline: DrainBaseline?, enabled: Bool, lastAlert: Date?) -> (RuntimeForecast?, Bool) {
+    private var revision = -1
+    func process(_ sample: BatterySnapshot, baseline: DrainBaseline?, forecastEnabled: Bool, enabled: Bool,
+                 lastAlert: Date?, revision: Int) -> (RuntimeForecast?, Bool) {
+        if revision != self.revision { reset(); self.revision = revision }
+        guard forecastEnabled || enabled else { return (nil, false) }
         recent.append(sample); recent.removeAll { sample.date.timeIntervalSince($0.date) > 660 }
         if !enabled { detector = DrainAnomalyDetector() }
         let alert = enabled && detector.evaluate(sample, baseline: baseline, lastAlert: lastAlert)
-        return (RuntimeForecast.estimate(recent), alert)
+        return (forecastEnabled ? RuntimeForecast.estimate(recent) : nil, alert)
     }
     func reset() { recent.removeAll(keepingCapacity: true); detector = DrainAnomalyDetector() }
 }
@@ -21,6 +25,7 @@ final class InsightsController: ObservableObject {
     @Published private(set) var error: String?
     @Published private(set) var drainWarning: String?
     @Published private(set) var loading = false
+    @Published private(set) var features = FeaturePreferences()
     @Published var range: HistoryRange = .week { didSet { Task { await reload() } } }
     @Published var reportWeeksAgo = 0 { didSet { Task { await reload() } } }
     @Published var profiles: [ChargeProfile] {
@@ -30,7 +35,14 @@ final class InsightsController: ObservableObject {
         }
     }
     @Published var selectedProfile: UUID? { didSet { defaults.set(selectedProfile?.uuidString, forKey: "selectedChargeProfile") } }
-    @Published var drainAlerts: Bool { didSet { defaults.set(drainAlerts, forKey: "drainAlerts"); if !drainAlerts { drainWarning = nil } } }
+    @Published var drainAlerts: Bool {
+        didSet {
+            defaults.set(drainAlerts, forKey: "drainAlerts")
+            processingRevision += 1
+            if !drainAlerts { drainWarning = nil }
+            Task { await reload() }
+        }
+    }
     @Published var weeklyNotifications: Bool { didSet { defaults.set(weeklyNotifications, forKey: "weeklyReports") } }
     private let defaults: UserDefaults
     private let processor = InsightProcessor()
@@ -47,6 +59,8 @@ final class InsightsController: ObservableObject {
     private var dirty = false
     private var lastDrainAlert: Date?
     private var lastForecastPublication = Date.distantPast
+    private var processingRevision = 0
+    var detectsDrain: Bool { features[.batteryHistory] && drainAlerts }
 
     init(defaults: UserDefaults) {
         self.defaults = defaults
@@ -60,23 +74,41 @@ final class InsightsController: ObservableObject {
         if defaults.data(forKey: "chargeProfiles") == nil { save(profiles, key: "chargeProfiles") }
     }
     func connect(_ store: HistoryStore?) { self.store = store }
+    func setFeatures(_ value: FeaturePreferences) {
+        guard value != features else { return }
+        let old = features
+        features = value
+        if old[.runtimeForecast] != value[.runtimeForecast] || old[.batteryHistory] != value[.batteryHistory] {
+            processingRevision += 1
+            if !features[.runtimeForecast] { forecast = nil }
+            if !features[.batteryHistory] { drainWarning = nil }
+        }
+        if !features.recordsSleep { clearPendingSleep() }
+        if !features.recordsAppEnergy { pendingUsage.removeAll(keepingCapacity: false) }
+        if old.recordsTimeline != features.recordsTimeline { lastBattery = nil; lastHelper = nil }
+        let queryFeatures: [CellFeature] = [.batteryHistory, .appActivity, .appEnergyHistory, .sleepTracking, .healthHistory, .timeline, .reports]
+        guard queryFeatures.contains(where: { old[$0] != value[$0] }) else { return }
+        // Clear disabled categories immediately; an older database query cannot republish them.
+        generation += 1; loading = false; dashboard = .init(); dirty = true
+        Task { await reload() }
+    }
     private func save<T: Encodable>(_ value: T, key: String) {
         if let data = try? JSONEncoder().encode(value) { defaults.set(data, forKey: key) }
     }
     func record(_ event: PowerEvent) async {
-        guard let store else { return }
+        guard features.recordsTimeline, let store else { return }
         do { try await store.recordEvent(event); dirty = true }
         catch { self.error = "Could not record the power timeline: \(error.localizedDescription)" }
     }
     func sleep(before snapshot: BatterySnapshot) {
-        guard snapshot.state != .unavailable else { return }
+        guard features.recordsSleep, snapshot.state != .unavailable else { return }
         var before = snapshot; before.date = .now
         let session = SleepSession(before: before)
         pendingSleep = session; recoveringSleep = false; save(session, key: "pendingSleepV2")
         Task { await record(.init(date: before.date, kind: .sleep, title: "Mac went to sleep", detail: "Battery at \(Int(before.level))%. The last available reading is used.")) }
     }
     private func finishSleep(after snapshot: BatterySnapshot) async {
-        guard var pending = pendingSleep else { return }
+        guard features.recordsSleep, var pending = pendingSleep else { return }
         guard snapshot.date > pending.before.date else { clearPendingSleep(); return }
         pending.after = snapshot
         pending.recoveredAfterRestart = recoveringSleep
@@ -107,29 +139,34 @@ final class InsightsController: ObservableObject {
             await record(.init(date: sample.date, kind: .monitoring, title: "Monitoring started", detail: "\(sample.state.title), \(Int(sample.level))%."))
         }
         lastBattery = sample
-        let result = await processor.process(sample, baseline: dashboard.baseline, enabled: drainAlerts, lastAlert: lastDrainAlert)
+        let revision = processingRevision
+        let result = await processor.process(sample, baseline: dashboard.baseline, forecastEnabled: features[.runtimeForecast],
+                                             enabled: detectsDrain, lastAlert: lastDrainAlert, revision: revision)
+        guard revision == processingRevision else { return }
         if let forecastValue = result.0 {
             if forecast == nil || sample.date.timeIntervalSince(lastForecastPublication) >= 30 {
                 forecast = forecastValue; lastForecastPublication = sample.date
             }
         } else if forecast != nil { forecast = nil }
-        if result.1, let baseline = dashboard.baseline {
+        if result.1, detectsDrain, let baseline = dashboard.baseline {
             lastDrainAlert = sample.date; defaults.set(sample.date, forKey: "lastDrainAlert")
             let detail = "Battery use has stayed above its recent baseline for 5 minutes. Baseline: \(Display.number(baseline.watts, unit: " W")). Current: \(Display.number(sample.batteryWatts.map { -$0 }, unit: " W")). A changed workload can explain this."
             drainWarning = detail
             await record(.init(date: sample.date, kind: .anomaly, title: "Unusual battery drain", detail: detail))
-            _ = await notifications.deliverInsight(id: "cell-drain", title: "Unusual battery drain", body: detail, sound: sound)
+            _ = await notifications.deliverInsight(id: "cell-drain", title: "Unusual battery drain", body: detail, sound: sound,
+                                                  enabled: { self.detectsDrain })
         }
         if Date.now.timeIntervalSince(lastFlush) >= 60 { await flushUsage() }
-        if dirty || Date.now.timeIntervalSince(lastLoad) >= 60 { await reload() }
-        if weeklyNotifications, reportWeeksAgo == 0, let report = dashboard.report,
+        if features[.batteryHistory], dirty || Date.now.timeIntervalSince(lastLoad) >= 60 { await reload() }
+        if weeklyNotifications, features.generatesReports, reportWeeksAgo == 0, let report = dashboard.report,
            report.current.observedSeconds >= 1_800 {
             var calendar = Calendar(identifier: .iso8601); calendar.timeZone = .current
             let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: sample.date)
             let key = "\(components.yearForWeekOfYear ?? 0)-\(components.weekOfYear ?? 0)"
             if defaults.string(forKey: "lastWeeklyReport") != key {
                 let delivered = await notifications.deliverInsight(id: "cell-weekly", title: "Your weekly battery report",
-                    body: "\(Display.duration(report.current.batterySeconds)) of recorded battery use in the past 7 days. Open Reports in Cell for energy, app and sleep details.", sound: sound)
+                    body: "\(Display.duration(report.current.batterySeconds)) of recorded battery use in the past 7 days. Open Reports in Cell for energy, app and sleep details.", sound: sound,
+                    enabled: { self.weeklyNotifications && self.features.generatesReports })
                 if delivered { defaults.set(key, forKey: "lastWeeklyReport") }
             }
         }
@@ -153,6 +190,7 @@ final class InsightsController: ObservableObject {
         }
     }
     func accumulate(_ apps: [AppActivity], at date: Date) {
+        guard features.recordsAppEnergy else { return }
         var combined: [String: AppEnergyInterval] = [:]
         let active = apps.filter { ($0.watts ?? 0) > 0.001 || $0.cpuPercent > 0.05 }
         let candidates = Array(active.sorted { ($0.watts ?? 0) > ($1.watts ?? 0) }.prefix(32)) +
@@ -178,24 +216,24 @@ final class InsightsController: ObservableObject {
     }
     func flushUsage() async {
         if let flushTask { await flushTask.value; return }
-        guard !pendingUsage.isEmpty, let store else { lastFlush = .now; return }
+        guard features.recordsAppEnergy, !pendingUsage.isEmpty, let store else { lastFlush = .now; return }
         let batch = pendingUsage; pendingUsage.removeAll(keepingCapacity: true)
         let task = Task { [weak self] in
             do { try await store.recordAppEnergy(batch); self?.dirty = true }
             catch {
-                self?.pendingUsage.insert(contentsOf: batch, at: 0)
+                if self?.features.recordsAppEnergy == true { self?.pendingUsage.insert(contentsOf: batch, at: 0) }
                 self?.error = "Could not save app energy history: \(error.localizedDescription)"
             }
         }
         flushTask = task; await task.value; flushTask = nil; lastFlush = .now
     }
     func reload() async {
-        guard let store else { return }
+        guard features[.batteryHistory], let store else { return }
         generation += 1; let token = generation; loading = true
         let end = reportWeeksAgo == 0 ? Date.now : Calendar.current.date(byAdding: .day, value: -reportWeeksAgo * 7,
                                                 to: Calendar.current.startOfDay(for: .now))!
         do {
-            let value = try await store.insights(range: range, reportEnd: end)
+            let value = try await store.insights(range: range, reportEnd: end, features: features, includeBaseline: drainAlerts)
             guard generation == token else { return }
             dashboard = value; lastLoad = .now; dirty = false; loading = false
         } catch {
@@ -204,7 +242,7 @@ final class InsightsController: ObservableObject {
         }
     }
     func apply(_ profile: ChargeProfile, controller: ChargeLimitController, monitor: BatteryMonitor) async {
-        guard profile.isValid, !controller.busy else { return }
+        guard features[.chargingProfiles], profile.isValid, !controller.busy else { return }
         await controller.configure(percentage: profile.limit, enabled: true)
         guard controller.error == nil, let status = controller.status, status.configuration.enabled,
               status.configuration.percentage == profile.limit else { return }

@@ -130,16 +130,26 @@ extension HistoryStore {
         try check(sqlite3_exec(db, "DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY time DESC LIMIT 10000)", nil, nil, nil))
     }
 
-    public func insights(range: HistoryRange, reportEnd: Date, now: Date = .now) throws -> InsightsDashboard {
+    public func insights(range: HistoryRange, reportEnd: Date, now: Date = .now,
+                         features: FeaturePreferences = .init(), includeBaseline: Bool = true) throws -> InsightsDashboard {
         var result = InsightsDashboard(); result.generated = now
+        guard features[.batteryHistory] else { return result }
         let since = now.addingTimeInterval(-range.seconds)
-        result.events = try records(PowerEvent.self, sql: "SELECT payload FROM events WHERE time>=? ORDER BY time DESC LIMIT 300", since: since)
-        result.sleep = try records(SleepSession.self, sql: "SELECT payload FROM sleep_sessions WHERE time>=? ORDER BY time DESC LIMIT 300", since: since)
-        result.health = try records(HealthReading.self, sql: "SELECT payload FROM health_days WHERE day>=? ORDER BY day", since: now.addingTimeInterval(-730 * 86_400))
-        result.apps = try appTotals(since: since, until: now)
-        let recent = try samples(since: now.addingTimeInterval(-max(range.seconds, 14 * 86_400)))
-        result.sessions = Array(InsightMath.chargingSessions(recent.filter { $0.date >= since }, now: now).prefix(100))
-        result.baseline = InsightMath.baseline(recent.filter { $0.date >= now.addingTimeInterval(-7 * 86_400) }, before: now.addingTimeInterval(-900))
+        if features.recordsTimeline {
+            result.events = try records(PowerEvent.self, sql: "SELECT payload FROM events WHERE time>=? ORDER BY time DESC LIMIT 300", since: since)
+        }
+        if features.recordsSleep {
+            result.sleep = try records(SleepSession.self, sql: "SELECT payload FROM sleep_sessions WHERE time>=? ORDER BY time DESC LIMIT 300", since: since)
+        }
+        if features.recordsHealth {
+            result.health = try records(HealthReading.self, sql: "SELECT payload FROM health_days WHERE day>=? ORDER BY day", since: now.addingTimeInterval(-730 * 86_400))
+        }
+        if features.recordsAppEnergy { result.apps = try appTotals(since: since, until: now) }
+        let needsSamples = features.recordsTimeline || includeBaseline || features.generatesReports
+        let recent = needsSamples ? try samples(since: now.addingTimeInterval(-max(range.seconds, 14 * 86_400))) : []
+        if features.recordsTimeline { result.sessions = Array(InsightMath.chargingSessions(recent.filter { $0.date >= since }, now: now).prefix(100)) }
+        if includeBaseline { result.baseline = InsightMath.baseline(recent.filter { $0.date >= now.addingTimeInterval(-7 * 86_400) }, before: now.addingTimeInterval(-900)) }
+        guard features.generatesReports else { return result }
         let calendar = Calendar.current
         let end = min(now, reportEnd)
         let start = calendar.date(byAdding: .day, value: -7, to: end)!
@@ -147,11 +157,11 @@ extension HistoryStore {
         let reportSamples = previousStart >= (recent.first?.date ?? .distantPast) ? recent : try samples(since: previousStart)
         let current = reportSamples.filter { $0.date >= start && $0.date < end }
         let previous = reportSamples.filter { $0.date >= previousStart && $0.date < start }
-        let sleeps = try records(SleepSession.self, sql: "SELECT payload FROM sleep_sessions WHERE time>=? ORDER BY time DESC", since: start).filter { ($0.after?.date ?? .distantFuture) < end }
+        let sleeps = features.recordsSleep ? try records(SleepSession.self, sql: "SELECT payload FROM sleep_sessions WHERE time>=? ORDER BY time DESC", since: start).filter { ($0.after?.date ?? .distantFuture) < end } : []
         let health = result.health.filter { $0.day >= calendar.startOfDay(for: start) && $0.day < end }
         let healthChange = health.count >= 2 ? health.last!.health - health.first!.health : nil
         result.report = .init(start: start, end: end, current: .init(samples: current), previous: .init(samples: previous),
-            days: InsightMath.dailyEnergy(current), apps: try appTotals(since: start, until: end), sleeps: sleeps, healthChange: healthChange)
+            days: InsightMath.dailyEnergy(current), apps: features.recordsAppEnergy ? try appTotals(since: start, until: end) : [], sleeps: sleeps, healthChange: healthChange)
         return result
     }
 }

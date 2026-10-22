@@ -57,7 +57,16 @@ struct CellApp: App {
                 Button("Export selected history…") { monitor.exportHistory() }.keyboardShortcut("e", modifiers: [.command, .shift])
             }
         }
-        MenuBarExtra {
+        Settings {
+            ScrollView { PreferencesView(monitor: monitor).padding(28) }
+                .frame(width: 900, height: 720)
+                .background(Palette.background).foregroundStyle(Palette.text).tint(Palette.violet)
+                .preferredColorScheme(.dark)
+        }
+        MenuBarExtra(isInserted: Binding(get: { monitor.features[.menuBar] }, set: { visible in
+            guard monitor.features[.menuBar] != visible else { return }
+            monitor.features[.menuBar] = visible
+        })) {
             MenuBarContent(monitor: monitor)
         } label: {
             HStack(spacing: 4) {
