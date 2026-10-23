@@ -1,14 +1,12 @@
 import SwiftUI
-import ServiceManagement
 import BatteryCore
 
 struct PreferencesView: View {
     @ObservedObject var monitor: BatteryMonitor
-    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
-    @State private var loginError: String?
     @State private var confirmClear = false
     var body: some View {
         VStack(spacing: 20) {
+            StartupSettingsView(controller: monitor.startup)
             Panel("Monitoring") {
                 setting("Battery refresh interval", detail: "macOS may update hardware sensors less often than Cell samples them.") {
                     Picker("Battery refresh interval", selection: $monitor.interval) {
@@ -49,16 +47,6 @@ struct PreferencesView: View {
             }
             ReminderAlarmSettingsView(monitor: monitor, controller: monitor.notifications.alarm)
                 .disabled(!monitor.features[.chargeAlerts])
-            Panel("Startup") {
-                setting("Open at login", detail: "Start Cell when you sign in to your Mac.") {
-                    Toggle("Open at login", isOn: $launchAtLogin).labelsHidden().toggleStyle(.switch)
-                        .onChange(of: launchAtLogin) { _, enabled in updateLogin(enabled) }
-                }
-                if SMAppService.mainApp.status == .requiresApproval {
-                    Button("Allow Cell in Login Items") { SMAppService.openSystemSettingsLoginItems() }.buttonStyle(.bordered)
-                }
-                if let loginError { Text(loginError).font(.system(size: 11)).foregroundStyle(Palette.amber) }
-            }
             Panel("Your data", subtitle: "No accounts, analytics, or network connections.") {
                 setting("Local history", detail: "When enabled, keep up to 90 days of battery, app, sleep and timeline history, and 2 years of daily health readings.") {
                     Button("Export CSV…") { monitor.exportHistory() }.buttonStyle(.bordered).disabled(monitor.history.isEmpty)
@@ -96,14 +84,5 @@ struct PreferencesView: View {
             }.frame(maxWidth: .infinity, alignment: .leading)
             control()
         }.padding(.vertical, 4)
-    }
-    private func updateLogin(_ enabled: Bool) {
-        do {
-            if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
-            loginError = nil
-        } catch {
-            loginError = error.localizedDescription
-            launchAtLogin = SMAppService.mainApp.status == .enabled
-        }
     }
 }

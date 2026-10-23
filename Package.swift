@@ -18,6 +18,7 @@ let package = Package(
                           linkerSettings: [.linkedFramework("IOKit")]),
         .executableTarget(name: "Cell", dependencies: ["BatteryCore", "CPlatform", "ChargeIPC", "ChargeHardware"],
                           linkerSettings: [.linkedFramework("IOKit")]),
-        .testTarget(name: "BatteryCoreTests", dependencies: ["BatteryCore", "CChargeControl", "CSQLite"])
+        .testTarget(name: "BatteryCoreTests", dependencies: ["BatteryCore", "CChargeControl", "CSQLite"]),
+        .testTarget(name: "CellTests", dependencies: ["Cell"])
     ]
 )

@@ -13,7 +13,7 @@ open dist/Cell.app
 
 The build creates an optimized, locally ad-hoc-signed app for the build machine’s architecture. Packaging verifies a separate staged bundle before replacing the previous app, so it never overwrites a running executable in place. Open the bundled app rather than `swift run`: macOS notifications and login items require an app identity. Move `dist/Cell.app` to Applications before enabling **Open at login**.
 
-For development, open `Package.swift` in Xcode, or use `make build`. `make test` runs the core calculation, alert, CSV, and SQLite tests. `./scripts/build-app.sh debug` packages a debug build. The wrapper keeps compiler and SwiftPM caches inside `.build` so builds also work in restricted workspaces.
+For development, open `Package.swift` in Xcode, or use `make build`. `make test` runs the core calculation, alert, CSV, SQLite, startup-controller and release-packaging tests. `./scripts/build-app.sh debug` packages a debug build. The wrapper keeps compiler and SwiftPM caches inside `.build` so builds also work in restricted workspaces.
 
 `dist/Cell.app/Contents/MacOS/Cell --diagnostics` prints a live battery snapshot and the count of readable user processes without opening a window or requesting notification permission. Exit status 2 means no internal battery was found.
 
@@ -37,6 +37,8 @@ For development, open `Package.swift` in Xcode, or use `make build`. `make test`
 ## Feature settings
 
 Open **Settings** in the sidebar or **Cell → Settings… (⌘,)** to choose optional features. Controls cover the menu bar, detailed readings, charging explanations, process sampling, app energy history, battery history/statistics, forecasts, sleep comparisons, daily health history, timeline/sessions, reports, profiles, unusual-drain notifications, weekly notifications and charge reminders. Alarm enablement, tone, volume and ringing duration are also available here.
+
+**Settings → Startup → Open at login** registers the current Cell.app with macOS so it opens after you sign in, including after restarting your Mac. Keep the app in Applications before enabling it. Startup is opt-in and needs no charging helper or administrator installation. If macOS requires approval, Cell shows a pending state and a button to open Login Items settings. Turning the switch off unregisters the login item. Both Settings windows share the system-reported state and refresh when Cell becomes active; Cell never silently re-enables an item disabled in System Settings. The current app stays running when startup is disabled.
 
 Choices persist across launches, and existing installations retain their current preferences. Turning off a feature stops its collection or calculations and hides its optional views. Saved data and reminder rules are kept, subject to normal retention. Turning off battery history also pauses dependent history features; their individual choices are retained for when recording resumes. Live battery status, percentage reminders and forecasts can run without stored history. Recording sessions have distinct identifiers so charts, energy totals and charging sessions never join across a recording pause, even a short one.
 

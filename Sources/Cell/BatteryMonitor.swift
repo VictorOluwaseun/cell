@@ -32,6 +32,7 @@ final class BatteryMonitor: ObservableObject {
     var activeAlerts: [ChargeAlert] { features[.chargeAlerts] ? alerts : [] }
     let notifications: NotificationService
     let chargeLimit = ChargeLimitController()
+    let startup = StartupController()
     let insights: InsightsController
     private let defaults: UserDefaults
     private let engine = TelemetryEngine()
