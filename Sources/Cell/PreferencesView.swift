@@ -42,7 +42,7 @@ struct PreferencesView: View {
             InsightPreferencesView(controller: monitor.insights, monitor: monitor)
             ChargingPreferencesView(controller: monitor.chargeLimit)
             Panel("Charge reminders") {
-                feature("Charge reminders", detail: "Check your saved percentage rules. Turning this off stops active alarms and snoozes without deleting your rules.", .chargeAlerts)
+                feature("Charge reminders", detail: "Enable percentage and time reminders. Turning this off stops active alarms and snoozes without deleting your rules.", .chargeAlerts)
                 setting("Alert sound", detail: "Enable sound for Cell alarms and macOS notifications. Choose the alarm tone, volume and ringing duration below.") {
                     Toggle("Alert sound", isOn: $monitor.sound).labelsHidden().toggleStyle(.switch)
                 }

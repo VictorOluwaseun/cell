@@ -56,11 +56,27 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Obs
             ? "Your battery is at \(Int(level.rounded()))%. Connect your charger when you’re ready."
             : "Your battery has reached \(Int(level.rounded()))%. Your charge reminder is ready."
         let message = ReminderAlarmMessage(ruleID: rule.id, title: content.title, body: content.body)
+        return await deliverReminder(content, message: message, identifier: rule.id.uuidString, sound: sound, enabled: { true })
+    }
+    func deliver(_ occurrence: TimedReminderOccurrence, sound: Bool, enabled: () -> Bool) async -> Bool {
+        let rule = occurrence.rule
+        let content = UNMutableNotificationContent()
+        content.title = rule.action.reminderTitle
+        let time = occurrence.date.formatted(date: .omitted, time: .shortened)
+        content.body = rule.action == .plugIn
+            ? "Your \(time) reminder: connect your Mac to its charger."
+            : "Your \(time) reminder: disconnect your Mac from its charger."
+        let message = ReminderAlarmMessage(ruleID: rule.id, title: content.title, body: content.body)
+        return await deliverReminder(content, message: message, identifier: "time-\(rule.id.uuidString)", sound: sound, enabled: enabled)
+    }
+    private func deliverReminder(_ content: UNMutableNotificationContent, message: ReminderAlarmMessage,
+                                 identifier: String, sound: Bool, enabled: () -> Bool) async -> Bool {
+        guard remindersEnabled, enabled() else { return false }
         // Local alarms are independent of notification permission, Focus and banner style.
         alarm.setSoundEnabled(sound)
         alarm.present(message)
         await refresh()
-        guard remindersEnabled else { return false }
+        guard remindersEnabled, enabled() else { return false }
         guard authorization == .authorized || authorization == .provisional else { return !alarm.session.messages.isEmpty }
         // Avoid layering a system chime over the repeating local alarm.
         if sound && !alarm.isRinging && alarm.session.snoozedUntil == nil { content.sound = .default }
@@ -69,9 +85,9 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Obs
             content.userInfo = ["cellAlarmID": message.id.uuidString]
         }
         do {
-            try await center.add(UNNotificationRequest(identifier: rule.id.uuidString, content: content, trigger: nil))
-            if !remindersEnabled {
-                center.removeDeliveredNotifications(withIdentifiers: [rule.id.uuidString])
+            try await center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
+            if !remindersEnabled || !enabled() {
+                center.removeDeliveredNotifications(withIdentifiers: [identifier])
                 return false
             }
             failure = nil; return true

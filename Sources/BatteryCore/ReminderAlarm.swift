@@ -61,14 +61,15 @@ public struct ReminderAlarmSession: Equatable, Sendable {
         messages.removeAll { $0.ruleID.map { !active.contains($0) } ?? false }
         if messages.isEmpty { snoozedUntil = nil }
     }
-    public mutating func reconcile(_ snapshot: BatterySnapshot, rules: [ChargeAlert]) {
+    public mutating func reconcile(_ snapshot: BatterySnapshot, rules: [ChargeAlert], timeRules: [TimedChargeReminder] = []) {
         guard snapshot.state != .unavailable else { return }
         let relevant = rules.filter { rule in
             rule.enabled && (rule.direction == .below
                 ? snapshot.state == .discharging && snapshot.level <= Double(rule.threshold)
                 : snapshot.state.onAC && snapshot.level >= Double(rule.threshold))
         }
-        retainRules(Set(relevant.map(\.id)))
+        let timed = timeRules.filter { $0.enabled && (!$0.onlyIfNeeded || !$0.action.isSatisfied(by: snapshot)) }
+        retainRules(Set(relevant.map(\.id) + timed.map(\.id)))
     }
     public mutating func dismiss() { messages.removeAll(); snoozedUntil = nil }
 }

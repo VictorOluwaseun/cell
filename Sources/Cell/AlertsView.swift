@@ -12,7 +12,7 @@ struct AlertsView: View {
         VStack(spacing: 20) {
             permissionPanel
             ReminderAlarmSettingsView(monitor: monitor, controller: notifications.alarm)
-            Panel("Your reminders", subtitle: "Reminders fire once, then rearm after the battery moves 2% away.") {
+            Panel("Percentage reminders", subtitle: "Reminders fire once, then rearm after the battery moves 2% away.") {
                 if monitor.alerts.isEmpty {
                     EmptyMessage(icon: "bell.badge", title: "Choose your first reminder", detail: "Add a charge target or a low-battery reminder below.")
                 }
@@ -34,7 +34,7 @@ struct AlertsView: View {
                     }.padding(.vertical, 7)
                 }
             }
-            Panel("Add a reminder") {
+            Panel("Add a percentage reminder") {
                 HStack(spacing: 20) {
                     Picker("When the battery", selection: $direction) {
                         ForEach(AlertDirection.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -47,6 +47,7 @@ struct AlertsView: View {
                 }
                 if duplicate { Text("You already have a reminder at this threshold.").font(.system(size: 11)).foregroundStyle(Palette.amber) }
             }
+            TimedRemindersView(controller: monitor.timeReminders)
             Panel {
                 HStack(alignment: .top, spacing: 14) {
                     Image(systemName: "moon.zzz").foregroundStyle(Palette.violet)

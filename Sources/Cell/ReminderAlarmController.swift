@@ -22,6 +22,7 @@ final class ReminderAlarmController: NSObject, ObservableObject, NSWindowDelegat
     var readBattery: (@Sendable () async -> BatterySnapshot)?
     private let defaults: UserDefaults
     private var rules: [ChargeAlert] = []
+    private var timeRules: [TimedChargeReminder] = []
     private var panel: NSPanel?
     private var audio: NSSound?
     private var sounds: [ReminderTone: NSSound] = [:]
@@ -75,7 +76,7 @@ final class ReminderAlarmController: NSObject, ObservableObject, NSWindowDelegat
             do { try await Task.sleep(for: .seconds(300)) } catch { return }
             let snapshot = await self?.readBattery?()
             guard let self, !Task.isCancelled else { return }
-            if let snapshot { self.session.reconcile(snapshot, rules: self.rules) }
+            if let snapshot { self.session.reconcile(snapshot, rules: self.rules, timeRules: self.timeRules) }
             guard self.session.resume(now: max(.now, deadline)) else {
                 if self.session.messages.isEmpty { self.dismiss() }
                 return
@@ -90,15 +91,21 @@ final class ReminderAlarmController: NSObject, ObservableObject, NSWindowDelegat
         NSApp.activate(ignoringOtherApps: true)
         panel?.makeKeyAndOrderFront(nil)
     }
-    func updateRules(_ rules: [ChargeAlert]) {
+    func updateRules(_ rules: [ChargeAlert], timeRules: [TimedChargeReminder] = []) {
+        let edited = Set(self.timeRules.compactMap { old in
+            timeRules.first(where: { $0.id == old.id }).flatMap { old.hasSameConfiguration(as: $0) ? nil : old.id }
+        })
+        for message in session.messages where message.ruleID.map(edited.contains) == true { session.remove(id: message.id) }
         self.rules = rules
-        session.retainRules(Set(rules.filter(\.enabled).map(\.id)))
+        self.timeRules = timeRules
+        session.retainRules(Set(rules.filter(\.enabled).map(\.id) + timeRules.filter(\.enabled).map(\.id)))
         if session.messages.isEmpty { dismiss() }
     }
-    func reconcile(_ snapshot: BatterySnapshot, rules: [ChargeAlert]) {
+    func reconcile(_ snapshot: BatterySnapshot, rules: [ChargeAlert], timeRules: [TimedChargeReminder] = []) {
         self.rules = rules
+        self.timeRules = timeRules
         guard !session.messages.isEmpty else { return }
-        session.reconcile(snapshot, rules: rules)
+        session.reconcile(snapshot, rules: rules, timeRules: timeRules)
         if session.messages.isEmpty { dismiss() }
     }
     private func startRinging() {

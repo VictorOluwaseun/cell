@@ -21,7 +21,7 @@ final class BatteryMonitor: ObservableObject {
     @Published private(set) var notice: String?
     @Published var range: HistoryRange = .day { didSet { Task { await loadHistory() } } }
     @Published var alerts: [ChargeAlert] = [] {
-        didSet { saveAlerts(); notifications.alarm.updateRules(activeAlerts) }
+        didSet { saveAlerts(); syncAlarmRules() }
     }
     @Published var interval: Double = 5 { didSet { defaults.set(interval, forKey: "sampleInterval") } }
     @Published var sound = true { didSet { defaults.set(sound, forKey: "alertSound"); notifications.alarm.setSoundEnabled(sound) } }
@@ -30,7 +30,9 @@ final class BatteryMonitor: ObservableObject {
         didSet { updateFeatures(from: oldValue) }
     }
     var activeAlerts: [ChargeAlert] { features[.chargeAlerts] ? alerts : [] }
+    private var activeTimeReminders: [TimedChargeReminder] { features[.chargeAlerts] ? timeReminders.reminders : [] }
     let notifications: NotificationService
+    let timeReminders: TimedReminderController
     let chargeLimit = ChargeLimitController()
     let startup = StartupController()
     let applicationQuitting = ApplicationQuitController()
@@ -43,6 +45,7 @@ final class BatteryMonitor: ObservableObject {
     private var loop: Task<Void, Never>?
     private var source: CFRunLoopSource?
     private var observers: [NSObjectProtocol] = []
+    private var clockObservers: [NSObjectProtocol] = []
     private var lastSave = Date.distantPast
     private var lastApps = Date.distantPast
     private var sampling = false
@@ -66,6 +69,7 @@ final class BatteryMonitor: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.notifications = NotificationService(defaults: defaults)
+        self.timeReminders = TimedReminderController(defaults: defaults)
         self.insights = InsightsController(defaults: defaults)
         self.defaults = defaults
         features = FeaturePreferences(defaults: defaults)
@@ -80,9 +84,19 @@ final class BatteryMonitor: ObservableObject {
         sound = defaults.object(forKey: "alertSound") as? Bool ?? true
         showPercentage = defaults.object(forKey: "showPercentage") as? Bool ?? true
         notifications.remindersEnabled = features[.chargeAlerts]
-        notifications.alarm.updateRules(activeAlerts)
+        syncAlarmRules()
         insights.setFeatures(features)
         notifications.alarm.readBattery = { [engine] in await engine.battery() }
+        timeReminders.readBattery = { [engine] in await engine.battery() }
+        timeReminders.rulesDidChange = { [weak self] in self?.syncAlarmRules() }
+        timeReminders.deliver = { [weak self] occurrence in
+            guard let self, self.timeReminders.isCurrent(occurrence) else { return }
+            self.notice = occurrence.rule.action.reminderTitle
+            _ = await self.notifications.deliver(occurrence, sound: self.sound,
+                enabled: { self.timeReminders.isCurrent(occurrence) })
+            await self.insights.record(.init(date: .now, kind: .alert, title: occurrence.rule.action.reminderTitle,
+                detail: "Scheduled for \(occurrence.date.formatted(date: .abbreviated, time: .shortened))."))
+        }
         do {
             let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
                 appropriateFor: nil, create: true)
@@ -95,6 +109,7 @@ final class BatteryMonitor: ObservableObject {
             self.apps.removeAll { $0.quitTarget == target }
         }
         installObservers()
+        timeReminders.start(enabled: features[.chargeAlerts])
         loop = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -115,7 +130,8 @@ final class BatteryMonitor: ObservableObject {
         if features[.chargeAlerts] != old[.chargeAlerts] {
             evaluator = AlertEvaluator()
             notifications.remindersEnabled = features[.chargeAlerts]
-            notifications.alarm.updateRules(activeAlerts)
+            timeReminders.setEnabled(features[.chargeAlerts])
+            syncAlarmRules()
         }
         if features[.appActivity] != old[.appActivity] || features.recordsAppEnergy != old.recordsAppEnergy {
             processGeneration += 1; needsProcessReset = true; lastApps = .distantPast
@@ -128,6 +144,8 @@ final class BatteryMonitor: ObservableObject {
         }
     }
 
+    private func syncAlarmRules() { notifications.alarm.updateRules(activeAlerts, timeRules: activeTimeReminders) }
+
     private func installObservers() {
         source = IOPSNotificationCreateRunLoopSource({ context in
             guard let context else { return }
@@ -139,19 +157,24 @@ final class BatteryMonitor: ObservableObject {
         observers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.asleep = true; self.insights.sleep(before: self.snapshot)
+                self.asleep = true; self.timeReminders.suspend(); self.insights.sleep(before: self.snapshot)
             }
         })
         observers.append(center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                self.asleep = false; self.recent.removeAll()
+                self.asleep = false; self.timeReminders.resume(); self.recent.removeAll()
                 await self.engine.resetProcesses(); await self.refresh()
             }
         })
         observers.append(center.addObserver(forName: NSWorkspace.sessionDidBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in await self?.notifications.refresh() }
         })
+        for name in [Notification.Name.NSSystemClockDidChange, .NSSystemTimeZoneDidChange] {
+            clockObservers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.timeReminders.clockChanged() }
+            })
+        }
     }
 
     func refresh() async {
@@ -162,7 +185,7 @@ final class BatteryMonitor: ObservableObject {
         snapshot = await engine.battery()
         guard !asleep, !clearingHistory else { return }
         if snapshot.state != .unavailable {
-            notifications.alarm.reconcile(snapshot, rules: activeAlerts)
+            notifications.alarm.reconcile(snapshot, rules: activeAlerts, timeRules: activeTimeReminders)
             if features[.advancedReadings] {
                 recent.append(snapshot)
                 recent.removeAll { snapshot.date.timeIntervalSince($0.date) > 960 }
@@ -260,6 +283,7 @@ final class BatteryMonitor: ObservableObject {
         if let data = try? JSONEncoder().encode(alerts) { defaults.set(data, forKey: "chargeAlerts") }
     }
     func shutdown() {
+        timeReminders.shutdown()
         applicationQuitting.cancelRequests()
         notifications.alarm.dismiss()
         asleep = true
@@ -268,6 +292,8 @@ final class BatteryMonitor: ObservableObject {
         source = nil
         for observer in observers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
         observers.removeAll()
+        for observer in clockObservers { NotificationCenter.default.removeObserver(observer) }
+        clockObservers.removeAll()
         // SQLite's WAL keeps committed samples safe on normal or abrupt termination.
     }
     func prepareForTermination() async {

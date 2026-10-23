@@ -110,8 +110,7 @@ struct DashboardView: View {
                 Text(item.rawValue).font(.system(size: 12, weight: page == item ? .semibold : .regular))
                 Spacer()
                 if item == .alerts {
-                    let count = monitor.alerts.filter(\.enabled).count
-                    if count > 0 { Text("\(count)").font(.system(size: 10)).padding(.horizontal, 6).padding(.vertical, 2).background(.white.opacity(0.08), in: Capsule()) }
+                    ChargeReminderCount(percentageCount: monitor.alerts.filter(\.enabled).count, controller: monitor.timeReminders)
                 }
             }.foregroundStyle(page == item ? Palette.violet : Palette.muted)
                 .padding(.horizontal, 13).padding(.vertical, 13).contentShape(Rectangle())

@@ -9,7 +9,7 @@ struct ReminderAlarmSettingsView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Cell alarm").font(.system(size: 13, weight: .medium))
-                    Text("Adds a visible window and repeating sound to percentage reminders.")
+                    Text("Adds a visible window and repeating sound to percentage and time reminders.")
                         .font(.system(size: 11)).foregroundStyle(Palette.muted)
                 }
                 Spacer()
