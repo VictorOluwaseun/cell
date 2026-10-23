@@ -6,6 +6,7 @@ struct AppIdentity: Sendable {
     var pid: Int32
     var name: String
     var bundlePath: String?
+    var quitTarget: ApplicationQuitTarget? = nil
 }
 
 struct AppActivity: Identifiable, Sendable {
@@ -18,6 +19,7 @@ struct AppActivity: Identifiable, Sendable {
     var memory: UInt64
     var processes: Int
     var sampledSeconds: Double = 0
+    var quitTarget: ApplicationQuitTarget? = nil
 }
 
 actor TelemetryEngine {
@@ -64,7 +66,8 @@ actor TelemetryEngine {
                 ? Double(row.energy_nj - old.energy) / 1_000_000_000 / dt : nil
             let wakeups = row.wakeups >= old.wakeups ? Double(row.wakeups - old.wakeups) / dt : 0
             var group = grouped[root] ?? AppActivity(id: root, name: identity?.name ?? fallback,
-                bundlePath: identity?.bundlePath, cpuPercent: 0, watts: nil, wakeups: 0, memory: 0, processes: 0)
+                bundlePath: identity?.bundlePath, cpuPercent: 0, watts: nil, wakeups: 0, memory: 0, processes: 0,
+                quitTarget: identity?.quitTarget)
             group.cpuPercent += cpu
             if let watts { group.watts = (group.watts ?? 0) + watts }
             group.wakeups += wakeups; group.memory += row.memory_bytes; group.processes += 1

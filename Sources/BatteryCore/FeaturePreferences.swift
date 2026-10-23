@@ -2,7 +2,7 @@ import Foundation
 
 public enum CellFeature: String, CaseIterable, Sendable {
     case batteryHistory, appActivity, appEnergyHistory, runtimeForecast, sleepTracking, healthHistory
-    case timeline, reports, chargingProfiles, chargingExplanation, advancedReadings, chargeAlerts, menuBar
+    case timeline, reports, chargingProfiles, chargingExplanation, advancedReadings, chargeAlerts, menuBar, applicationQuitting
 
     private var key: String { self == .appActivity ? "appMonitoring" : "feature.\(rawValue)" }
 

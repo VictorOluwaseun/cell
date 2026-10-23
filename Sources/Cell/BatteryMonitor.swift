@@ -33,6 +33,7 @@ final class BatteryMonitor: ObservableObject {
     let notifications: NotificationService
     let chargeLimit = ChargeLimitController()
     let startup = StartupController()
+    let applicationQuitting = ApplicationQuitController()
     let insights: InsightsController
     private let defaults: UserDefaults
     private let engine = TelemetryEngine()
@@ -88,6 +89,11 @@ final class BatteryMonitor: ObservableObject {
             store = try HistoryStore(url: base.appendingPathComponent("Cell/history.sqlite"))
         } catch { self.error = "History could not be opened: \(error.localizedDescription)" }
         insights.connect(store)
+        applicationQuitting.onTermination = { [weak self] target in
+            guard let self else { return }
+            self.processGeneration += 1
+            self.apps.removeAll { $0.quitTarget == target }
+        }
         installObservers()
         loop = Task { [weak self] in
             while !Task.isCancelled {
@@ -103,6 +109,9 @@ final class BatteryMonitor: ObservableObject {
         guard features != old else { return }
         features.save(to: defaults)
         insights.setFeatures(features)
+        if !features[.applicationQuitting] || !features[.appActivity] {
+            applicationQuitting.cancelRequests(); applicationQuitting.dismissMessage()
+        }
         if features[.chargeAlerts] != old[.chargeAlerts] {
             evaluator = AlertEvaluator()
             notifications.remindersEnabled = features[.chargeAlerts]
@@ -177,7 +186,8 @@ final class BatteryMonitor: ObservableObject {
             let generation = processGeneration
             if needsProcessReset { needsProcessReset = false; await engine.resetProcesses() }
             let catalog = NSWorkspace.shared.runningApplications.map {
-                AppIdentity(pid: $0.processIdentifier, name: $0.localizedName ?? "Application", bundlePath: $0.bundleURL?.path)
+                AppIdentity(pid: $0.processIdentifier, name: $0.localizedName ?? "Application", bundlePath: $0.bundleURL?.path,
+                            quitTarget: features[.applicationQuitting] ? ApplicationQuitTarget.make($0) : nil)
             }
             let result = await engine.applications(catalog: catalog)
             if features[.appActivity], generation == processGeneration, !asleep, !clearingHistory {
@@ -242,10 +252,15 @@ final class BatteryMonitor: ObservableObject {
         } catch { self.error = "History could not be cleared: \(error.localizedDescription)" }
     }
     func dismissMessages() { error = nil; notice = nil }
+    func quitApplication(_ app: AppActivity) {
+        guard features[.appActivity], features[.applicationQuitting] else { return }
+        applicationQuitting.requestQuit(app)
+    }
     private func saveAlerts() {
         if let data = try? JSONEncoder().encode(alerts) { defaults.set(data, forKey: "chargeAlerts") }
     }
     func shutdown() {
+        applicationQuitting.cancelRequests()
         notifications.alarm.dismiss()
         asleep = true
         loop?.cancel(); loop = nil

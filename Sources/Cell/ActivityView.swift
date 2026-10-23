@@ -50,6 +50,8 @@ struct ActivityView: View {
     @State private var onlyApps = false
     @State private var sort: ActivitySort = .power
     @State private var showHistory = false
+    @State private var appToQuit: AppActivity?
+    private var showQuit: Bool { monitor.features[.appActivity] && monitor.features[.applicationQuitting] }
     private enum ActivitySort: String, CaseIterable { case power = "Power", cpu = "CPU", wakeups = "Wakeups", memory = "Memory" }
     private var filtered: [AppActivity] {
         monitor.apps.filter {
@@ -75,9 +77,19 @@ struct ActivityView: View {
             if showHistory && monitor.features.recordsAppEnergy { AppEnergyHistoryView(controller: monitor.insights) }
             else { liveContent }
         }
+        .confirmationDialog("Quit application?", isPresented: Binding(get: { appToQuit != nil }, set: { if !$0 { appToQuit = nil } }),
+                            titleVisibility: .visible, presenting: appToQuit) { app in
+            Button("Quit \(app.name)", role: .destructive) { monitor.quitApplication(app) }
+            Button("Cancel", role: .cancel) {}
+        } message: { app in
+            Text("\(app.name) will be asked to close normally. It may ask you to save unsaved work before quitting.")
+        }
+        .onChange(of: showQuit) { _, enabled in if !enabled { appToQuit = nil } }
+        .onChange(of: showHistory) { _, _ in appToQuit = nil }
     }
     private var liveContent: some View {
         VStack(spacing: 20) {
+            ApplicationQuitStatus(controller: monitor.applicationQuitting)
             Panel {
                 HStack(alignment: .top, spacing: 14) {
                     Image(systemName: "info.circle").foregroundStyle(Palette.blue)
@@ -99,12 +111,13 @@ struct ActivityView: View {
                         ForEach(ActivitySort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                     }.frame(width: 150)
                 }
-                HStack {
+                HStack(spacing: 10) {
                     Text("Application"); Spacer()
                     Text("CPU").frame(width: 75, alignment: .trailing)
                     Text("Wakeups").frame(width: 85, alignment: .trailing)
                     Text("Memory").frame(width: 85, alignment: .trailing)
                     Text("Power").frame(width: 90, alignment: .trailing)
+                    if showQuit { Text("Action").frame(width: 82, alignment: .trailing) }
                 }.font(.system(size: 10)).foregroundStyle(Palette.muted)
                 if !monitor.features[.appActivity] {
                     EmptyMessage(icon: "pause.circle", title: "Monitoring is paused", detail: "Turn on app monitoring in Settings to collect app activity.")
@@ -115,7 +128,12 @@ struct ActivityView: View {
                 } else {
                     LazyVStack(spacing: 0) {
                         ForEach(filtered) { app in
-                            AppActivityRow(app: app).padding(.vertical, 12)
+                            HStack(spacing: 10) {
+                                AppActivityRow(app: app)
+                                if showQuit {
+                                    ApplicationQuitButton(app: app, controller: monitor.applicationQuitting) { appToQuit = app }
+                                }
+                            }.padding(.vertical, 12)
                                 .overlay(alignment: .bottom) { Rectangle().fill(Palette.line.opacity(0.55)).frame(height: 1) }
                         }
                     }
@@ -125,6 +143,10 @@ struct ActivityView: View {
                     Spacer()
                     Text("\(filtered.count) visible")
                 }.font(.system(size: 10)).foregroundStyle(Palette.muted)
+                if showQuit {
+                    Text("Quit asks the app to close normally. Check that app for any save prompts before trying again.")
+                        .font(.system(size: 11)).foregroundStyle(Palette.muted)
+                }
             }
         }
     }

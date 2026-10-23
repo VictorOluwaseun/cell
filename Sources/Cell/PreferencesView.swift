@@ -25,6 +25,8 @@ struct PreferencesView: View {
             }
             Panel("Activity & history", subtitle: "Turning a feature off pauses its work and hides its views. Saved records and choices are kept; normal retention still applies.") {
                 feature("App activity", detail: "Sample process power and CPU use every 10–30 seconds. Turning this off stops process sampling.", .appActivity)
+                feature("Quit applications", detail: "Show a Quit action for running apps in App activity. Apps can ask you to save work before closing.", .applicationQuitting)
+                    .disabled(!monitor.features[.appActivity])
                 feature("Battery history & statistics", detail: "Record minute readings for charts, energy statistics and reports. Live battery status stays available when off.", .batteryHistory)
                 feature("App energy history", detail: "Save hourly app energy totals. Requires app activity and battery history.", .appEnergyHistory)
                     .disabled(!monitor.features[.appActivity] || !monitor.features[.batteryHistory])
