@@ -99,7 +99,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Obs
         guard authorization == .authorized || authorization == .provisional else { return }
         let content = UNMutableNotificationContent()
         content.title = "Cell test notification"
-        content.body = "This tests macOS notifications. Use Test alarm in Charge alerts to check Cell’s repeating alarm."
+        content.body = "This tests macOS notifications. Use Test alarm in Alerts to check Cell’s repeating alarm."
         if sound { content.sound = .default }
         do { try await center.add(UNNotificationRequest(identifier: "cell-test", content: content, trigger: nil)) }
         catch { failure = error.localizedDescription }
@@ -113,7 +113,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Obs
         do {
             try await center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
             if !enabled() { center.removeDeliveredNotifications(withIdentifiers: [id]); return false }
-            return true
+            failure = nil; return true
         } catch { failure = error.localizedDescription; return false }
     }
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,

@@ -39,6 +39,7 @@ struct PreferencesView: View {
                 feature("Weekly reports", detail: "Build reports inside Cell from recorded history. Requires battery history.", .reports)
                     .disabled(!monitor.features[.batteryHistory])
             }
+            AppResourceAlertSettingsView(controller: monitor.appResourceAlerts, notifications: monitor.notifications)
             InsightPreferencesView(controller: monitor.insights, monitor: monitor)
             ChargingPreferencesView(controller: monitor.chargeLimit)
             Panel("Charge reminders") {

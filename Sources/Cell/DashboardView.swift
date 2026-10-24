@@ -2,7 +2,7 @@ import SwiftUI
 import BatteryCore
 
 enum DashboardPage: String, CaseIterable, Identifiable {
-    case overview = "Overview", history = "Statistics", activity = "App activity", insights = "Insights", timeline = "Timeline", reports = "Reports", limit = "Charging limit", alerts = "Charge alerts", settings = "Settings"
+    case overview = "Overview", history = "Statistics", activity = "App activity", insights = "Insights", timeline = "Timeline", reports = "Reports", limit = "Charging limit", alerts = "Alerts", settings = "Settings"
     var id: Self { self }
     var symbol: String {
         switch self {
@@ -26,7 +26,7 @@ enum DashboardPage: String, CaseIterable, Identifiable {
         case .timeline: "Power changes, sleep and charging, in context."
         case .reports: "A measured look at your week."
         case .limit: "Choose where your battery takes a break."
-        case .alerts: "The right reminder, at the right percentage."
+        case .alerts: "Battery reminders and alerts for demanding apps."
         case .settings: "Make Cell work your way."
         }
     }
@@ -98,7 +98,7 @@ struct DashboardView: View {
         case .activity: monitor.features[.appActivity]
         case .timeline: monitor.features.recordsTimeline
         case .reports: monitor.features.generatesReports
-        case .alerts: monitor.features[.chargeAlerts]
+        case .alerts: monitor.features[.chargeAlerts] || monitor.features[.appActivity]
         case .insights: monitor.features[.runtimeForecast] || monitor.features[.batteryHistory]
         default: true
         }
@@ -110,7 +110,8 @@ struct DashboardView: View {
                 Text(item.rawValue).font(.system(size: 12, weight: page == item ? .semibold : .regular))
                 Spacer()
                 if item == .alerts {
-                    ChargeReminderCount(percentageCount: monitor.alerts.filter(\.enabled).count, controller: monitor.timeReminders)
+                    ChargeReminderCount(percentageCount: monitor.features[.chargeAlerts] ? monitor.alerts.filter(\.enabled).count : 0,
+                                        controller: monitor.timeReminders)
                 }
             }.foregroundStyle(page == item ? Palette.violet : Palette.muted)
                 .padding(.horizontal, 13).padding(.vertical, 13).contentShape(Rectangle())

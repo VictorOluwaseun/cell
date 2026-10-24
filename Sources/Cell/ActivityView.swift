@@ -90,6 +90,7 @@ struct ActivityView: View {
     private var liveContent: some View {
         VStack(spacing: 20) {
             ApplicationQuitStatus(controller: monitor.applicationQuitting)
+            AppResourceAlertHistoryView(controller: monitor.appResourceAlerts)
             Panel {
                 HStack(alignment: .top, spacing: 14) {
                     Image(systemName: "info.circle").foregroundStyle(Palette.blue)

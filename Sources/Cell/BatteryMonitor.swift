@@ -33,6 +33,7 @@ final class BatteryMonitor: ObservableObject {
     private var activeTimeReminders: [TimedChargeReminder] { features[.chargeAlerts] ? timeReminders.reminders : [] }
     let notifications: NotificationService
     let timeReminders: TimedReminderController
+    let appResourceAlerts: AppResourceAlertController
     let chargeLimit = ChargeLimitController()
     let startup = StartupController()
     let applicationQuitting = ApplicationQuitController()
@@ -70,6 +71,7 @@ final class BatteryMonitor: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.notifications = NotificationService(defaults: defaults)
         self.timeReminders = TimedReminderController(defaults: defaults)
+        self.appResourceAlerts = AppResourceAlertController(defaults: defaults)
         self.insights = InsightsController(defaults: defaults)
         self.defaults = defaults
         features = FeaturePreferences(defaults: defaults)
@@ -86,6 +88,13 @@ final class BatteryMonitor: ObservableObject {
         notifications.remindersEnabled = features[.chargeAlerts]
         syncAlarmRules()
         insights.setFeatures(features)
+        appResourceAlerts.setMonitoringEnabled(features[.appActivity])
+        appResourceAlerts.deliver = { [weak self] alert, enabled in
+            guard let self, enabled() else { return }
+            await self.insights.record(.init(date: alert.date, kind: .alert, title: alert.title, detail: alert.detail))
+            _ = await self.notifications.deliverInsight(id: "cell-app-resource-\(alert.id.uuidString)", title: alert.title,
+                body: alert.detail + " Open App activity in Cell to review.", sound: self.sound, enabled: enabled)
+        }
         notifications.alarm.readBattery = { [engine] in await engine.battery() }
         timeReminders.readBattery = { [engine] in await engine.battery() }
         timeReminders.rulesDidChange = { [weak self] in self?.syncAlarmRules() }
@@ -107,6 +116,7 @@ final class BatteryMonitor: ObservableObject {
             guard let self else { return }
             self.processGeneration += 1
             self.apps.removeAll { $0.quitTarget == target }
+            self.appResourceAlerts.resetObservations()
         }
         installObservers()
         timeReminders.start(enabled: features[.chargeAlerts])
@@ -136,6 +146,8 @@ final class BatteryMonitor: ObservableObject {
         if features[.appActivity] != old[.appActivity] || features.recordsAppEnergy != old.recordsAppEnergy {
             processGeneration += 1; needsProcessReset = true; lastApps = .distantPast
             apps = []; lastAppUpdate = nil
+            appResourceAlerts.setMonitoringEnabled(features[.appActivity])
+            appResourceAlerts.resetObservations()
         }
         if features[.batteryHistory] != old[.batteryHistory] {
             historyGeneration += 1; lastSave = .distantPast; recordingID = UUID()
@@ -157,14 +169,15 @@ final class BatteryMonitor: ObservableObject {
         observers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.asleep = true; self.timeReminders.suspend(); self.insights.sleep(before: self.snapshot)
+                self.asleep = true; self.timeReminders.suspend(); self.appResourceAlerts.suspend(); self.insights.sleep(before: self.snapshot)
             }
         })
         observers.append(center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                self.asleep = false; self.timeReminders.resume(); self.recent.removeAll()
-                await self.engine.resetProcesses(); await self.refresh()
+                self.asleep = false; self.timeReminders.resume(); self.appResourceAlerts.resume(); self.recent.removeAll()
+                self.processGeneration += 1; self.needsProcessReset = true; self.lastApps = .distantPast
+                await self.refresh()
             }
         })
         observers.append(center.addObserver(forName: NSWorkspace.sessionDidBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
@@ -184,6 +197,7 @@ final class BatteryMonitor: ObservableObject {
         let previous = snapshot
         snapshot = await engine.battery()
         guard !asleep, !clearingHistory else { return }
+        appResourceAlerts.observeBatteryState(snapshot.state)
         if snapshot.state != .unavailable {
             notifications.alarm.reconcile(snapshot, rules: activeAlerts, timeRules: activeTimeReminders)
             if features[.advancedReadings] {
@@ -217,6 +231,7 @@ final class BatteryMonitor: ObservableObject {
                 apps = result
                 insights.accumulate(apps, at: .now)
                 lastApps = .now; lastAppUpdate = .now
+                await appResourceAlerts.consume(apps, batteryState: snapshot.state)
             }
         }
         await chargeLimit.refresh()
@@ -284,6 +299,7 @@ final class BatteryMonitor: ObservableObject {
     }
     func shutdown() {
         timeReminders.shutdown()
+        appResourceAlerts.shutdown()
         applicationQuitting.cancelRequests()
         notifications.alarm.dismiss()
         asleep = true

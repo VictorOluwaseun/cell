@@ -11,43 +11,47 @@ struct AlertsView: View {
     var body: some View {
         VStack(spacing: 20) {
             permissionPanel
-            ReminderAlarmSettingsView(monitor: monitor, controller: notifications.alarm)
-            Panel("Percentage reminders", subtitle: "Reminders fire once, then rearm after the battery moves 2% away.") {
-                if monitor.alerts.isEmpty {
-                    EmptyMessage(icon: "bell.badge", title: "Choose your first reminder", detail: "Add a charge target or a low-battery reminder below.")
+            AppResourceAlertSettingsView(controller: monitor.appResourceAlerts, notifications: notifications)
+            AppResourceAlertHistoryView(controller: monitor.appResourceAlerts)
+            if monitor.features[.chargeAlerts] {
+                ReminderAlarmSettingsView(monitor: monitor, controller: notifications.alarm)
+                Panel("Percentage reminders", subtitle: "Reminders fire once, then rearm after the battery moves 2% away.") {
+                    if monitor.alerts.isEmpty {
+                        EmptyMessage(icon: "bell.badge", title: "Choose your first reminder", detail: "Add a charge target or a low-battery reminder below.")
+                    }
+                    ForEach($monitor.alerts) { $rule in
+                        HStack(spacing: 15) {
+                            Image(systemName: rule.direction == .above ? "battery.100percent.bolt" : "battery.25percent")
+                                .foregroundStyle(rule.direction == .above ? Palette.mint : Palette.amber)
+                                .font(.system(size: 22)).frame(width: 42, height: 45)
+                                .background(Palette.background, in: RoundedRectangle(cornerRadius: 10))
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(rule.title).font(.system(size: 14, weight: .medium))
+                                Text("\(rule.direction.title) \(rule.threshold)% \(rule.direction == .above ? "while connected" : "on battery")")
+                                    .font(.system(size: 12)).foregroundStyle(Palette.muted)
+                            }
+                            Spacer()
+                            Toggle("Enable \(rule.title) at \(rule.threshold)%", isOn: $rule.enabled).labelsHidden().toggleStyle(.switch)
+                            Button(role: .destructive) { monitor.alerts.removeAll { $0.id == rule.id } } label: { Image(systemName: "trash").padding(8) }
+                                .buttonStyle(.plain).foregroundStyle(Palette.muted).help("Delete reminder").accessibilityLabel("Delete \(rule.title) at \(rule.threshold)%")
+                        }.padding(.vertical, 7)
+                    }
                 }
-                ForEach($monitor.alerts) { $rule in
-                    HStack(spacing: 15) {
-                        Image(systemName: rule.direction == .above ? "battery.100percent.bolt" : "battery.25percent")
-                            .foregroundStyle(rule.direction == .above ? Palette.mint : Palette.amber)
-                            .font(.system(size: 22)).frame(width: 42, height: 45)
-                            .background(Palette.background, in: RoundedRectangle(cornerRadius: 10))
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(rule.title).font(.system(size: 14, weight: .medium))
-                            Text("\(rule.direction.title) \(rule.threshold)% \(rule.direction == .above ? "while connected" : "on battery")")
-                                .font(.system(size: 12)).foregroundStyle(Palette.muted)
-                        }
-                        Spacer()
-                        Toggle("Enable \(rule.title) at \(rule.threshold)%", isOn: $rule.enabled).labelsHidden().toggleStyle(.switch)
-                        Button(role: .destructive) { monitor.alerts.removeAll { $0.id == rule.id } } label: { Image(systemName: "trash").padding(8) }
-                            .buttonStyle(.plain).foregroundStyle(Palette.muted).help("Delete reminder").accessibilityLabel("Delete \(rule.title) at \(rule.threshold)%")
-                    }.padding(.vertical, 7)
+                Panel("Add a percentage reminder") {
+                    HStack(spacing: 20) {
+                        Picker("When the battery", selection: $direction) {
+                            ForEach(AlertDirection.allCases, id: \.self) { Text($0.title).tag($0) }
+                        }.frame(width: 230)
+                        Slider(value: $threshold, in: 1...100, step: 1).accessibilityLabel("Battery threshold")
+                        Text("\(Int(threshold))%").font(.system(size: 22, weight: .medium, design: .rounded)).monospacedDigit().frame(width: 58)
+                        Button("Add reminder") {
+                            monitor.alerts.append(ChargeAlert(direction: direction, threshold: Int(threshold)))
+                        }.buttonStyle(.borderedProminent).disabled(duplicate)
+                    }
+                    if duplicate { Text("You already have a reminder at this threshold.").font(.system(size: 11)).foregroundStyle(Palette.amber) }
                 }
+                TimedRemindersView(controller: monitor.timeReminders)
             }
-            Panel("Add a percentage reminder") {
-                HStack(spacing: 20) {
-                    Picker("When the battery", selection: $direction) {
-                        ForEach(AlertDirection.allCases, id: \.self) { Text($0.title).tag($0) }
-                    }.frame(width: 230)
-                    Slider(value: $threshold, in: 1...100, step: 1).accessibilityLabel("Battery threshold")
-                    Text("\(Int(threshold))%").font(.system(size: 22, weight: .medium, design: .rounded)).monospacedDigit().frame(width: 58)
-                    Button("Add reminder") {
-                        monitor.alerts.append(ChargeAlert(direction: direction, threshold: Int(threshold)))
-                    }.buttonStyle(.borderedProminent).disabled(duplicate)
-                }
-                if duplicate { Text("You already have a reminder at this threshold.").font(.system(size: 11)).foregroundStyle(Palette.amber) }
-            }
-            TimedRemindersView(controller: monitor.timeReminders)
             Panel {
                 HStack(alignment: .top, spacing: 14) {
                     Image(systemName: "moon.zzz").foregroundStyle(Palette.violet)

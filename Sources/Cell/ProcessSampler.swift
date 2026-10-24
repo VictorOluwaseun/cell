@@ -20,6 +20,7 @@ struct AppActivity: Identifiable, Sendable {
     var processes: Int
     var sampledSeconds: Double = 0
     var quitTarget: ApplicationQuitTarget? = nil
+    var processStarted: UInt64? = nil
 }
 
 actor TelemetryEngine {
@@ -75,7 +76,7 @@ actor TelemetryEngine {
         }
         previous = next; previousTime = now
         return grouped.values.map { value in
-            var value = value; value.sampledSeconds = dt; return value
+            var value = value; value.sampledSeconds = dt; value.processStarted = next[value.id]?.started; return value
         }.sorted {
             if $0.watts != nil || $1.watts != nil { return ($0.watts ?? -1) > ($1.watts ?? -1) }
             return $0.cpuPercent > $1.cpuPercent
