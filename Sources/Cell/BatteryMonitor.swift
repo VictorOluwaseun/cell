@@ -35,7 +35,7 @@ final class BatteryMonitor: ObservableObject {
     let timeReminders: TimedReminderController
     let appResourceAlerts: AppResourceAlertController
     let chargeLimit = ChargeLimitController()
-    let startup = StartupController()
+    let startup: StartupController
     let applicationQuitting = ApplicationQuitController()
     let insights: InsightsController
     private let defaults: UserDefaults
@@ -72,6 +72,8 @@ final class BatteryMonitor: ObservableObject {
         self.notifications = NotificationService(defaults: defaults)
         self.timeReminders = TimedReminderController(defaults: defaults)
         self.appResourceAlerts = AppResourceAlertController(defaults: defaults)
+        // Detect a fresh installation before other controllers save their initial preferences.
+        self.startup = StartupController(defaults: defaults)
         self.insights = InsightsController(defaults: defaults)
         self.defaults = defaults
         features = FeaturePreferences(defaults: defaults)
@@ -121,6 +123,7 @@ final class BatteryMonitor: ObservableObject {
         installObservers()
         timeReminders.start(enabled: features[.chargeAlerts])
         loop = Task { [weak self] in
+            await self?.startup.configureFirstLaunch()
             while !Task.isCancelled {
                 guard let self else { return }
                 if !self.asleep { await self.refresh() }

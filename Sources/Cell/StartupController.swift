@@ -25,7 +25,12 @@ final class StartupController: ObservableObject {
     @Published private(set) var busy = false
     @Published private(set) var error: String?
     private let service: any LoginItemService
+    private let defaults: UserDefaults?
+    private let installedApp: Bool
     private var activation: AnyCancellable?
+    private static let setupKey = "startupInitialSetup"
+    private static let pending = "pendingInstallation"
+    private static let finished = "finished"
 
     var enabled: Bool { status == .enabled }
     var needsApproval: Bool { status == .requiresApproval }
@@ -40,8 +45,21 @@ final class StartupController: ObservableObject {
         }
     }
 
-    init(service: any LoginItemService, observeActivation: Bool = true) {
+    init(service: any LoginItemService, observeActivation: Bool = true, defaults: UserDefaults? = nil,
+         appURL: URL? = nil, applicationDirectories: [URL]? = nil) {
         self.service = service
+        self.defaults = defaults
+        let directories = applicationDirectories ?? FileManager.default.urls(for: .applicationDirectory, in: [.localDomainMask, .userDomainMask])
+        let path = appURL?.resolvingSymlinksInPath().standardizedFileURL.path
+        installedApp = path.map { path in
+            directories.contains { path.hasPrefix($0.resolvingSymlinksInPath().standardizedFileURL.path + "/") }
+        } ?? false
+        if let defaults, defaults.object(forKey: Self.setupKey) == nil {
+            // Earlier versions saved chargeProfiles on every first run. Keep those users' system choice.
+            let usedBefore = ["chargeProfiles", "chargeAlerts", "sampleInterval", "appMonitoring", "alertSound", "showPercentage"]
+                .contains { defaults.object(forKey: $0) != nil }
+            defaults.set(usedBefore ? Self.finished : Self.pending, forKey: Self.setupKey)
+        }
         status = service.status
         if observeActivation {
             activation = NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
@@ -51,7 +69,23 @@ final class StartupController: ObservableObject {
                 }
         }
     }
-    convenience init() { self.init(service: SystemLoginItemService()) }
+    convenience init(defaults: UserDefaults = .standard) {
+        self.init(service: SystemLoginItemService(), defaults: defaults, appURL: Bundle.main.bundleURL)
+    }
+
+    /// One attempt on a fresh installed copy. Never register development/DMG copies or undo an opt-out.
+    func configureFirstLaunch() async {
+        guard !busy, let defaults, defaults.string(forKey: Self.setupKey) == Self.pending else { return }
+        refresh()
+        if registered {
+            defaults.set(Self.finished, forKey: Self.setupKey)
+            return
+        }
+        guard installedApp else { return }
+        // Save before registration, including failure or required approval. Future launches only read state.
+        defaults.set(Self.finished, forKey: Self.setupKey)
+        await changeRegistration(true)
+    }
 
     func refresh() {
         guard !busy else { return }
@@ -59,6 +93,11 @@ final class StartupController: ObservableObject {
         if actual != status { status = actual; error = nil }
     }
     func setEnabled(_ value: Bool) async {
+        // An explicit choice also cancels pending automatic setup before the app is moved to Applications.
+        defaults?.set(Self.finished, forKey: Self.setupKey)
+        await changeRegistration(value)
+    }
+    private func changeRegistration(_ value: Bool) async {
         guard !busy else { return }
         refresh()
         // An approval-pending item is already registered; repeated registration cannot approve it.

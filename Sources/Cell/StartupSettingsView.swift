@@ -25,7 +25,7 @@ struct StartupSettingsView: View {
                     controller.openSettings()
                 }.buttonStyle(.bordered)
             }
-            Text("Keep Cell in Applications before enabling startup so macOS can launch your installed copy. This opens Cell after sign-in; the charging helper is managed separately.")
+            Text("Fresh installations enable startup the first time Cell opens from Applications. macOS may require approval. You can turn this off at any time; Cell keeps your choice. Startup opens Cell after sign-in; the charging helper is managed separately.")
                 .font(.system(size: 11)).foregroundStyle(Palette.muted).lineSpacing(3)
             if let error = controller.error {
                 Label(error, systemImage: "exclamationmark.triangle").font(.system(size: 11))
